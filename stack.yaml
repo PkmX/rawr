@@ -2,16 +2,6 @@ resolver: nightly-2016-08-02
 
 packages:
 - '.'
-- location:
-    git: https://github.com/haskell-suite/haskell-src-exts
-    commit: 0fd151d23ea3ee27d67246a9a5f8791f683465e2
-  extra-dep: true
-- location:
-    git: https://github.com/ndmitchell/hlint
-    commit: 24c5184f5ac6c94a043154f29e91a9633dbf0ac4
-  extra-dep: true
 
 extra-deps:
-- type-level-sets-0.7
-- colorize-haskell-1.0.1
 - ghc-datasize-0.1.2
