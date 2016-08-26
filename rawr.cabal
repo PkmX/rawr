@@ -1,0 +1,73 @@
+-- This file has been generated from package.yaml by hpack version 0.14.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           rawr
+version:        0.0.0.0
+synopsis:       Anonymous extensible records and variant types
+description:    See "Data.Rawr" for a tutorial of this library.
+category:       Records
+homepage:       https://github.com/pkmx/rawr
+author:         PkmX
+maintainer:     pkmx.tw@gmail.com
+copyright:      2016 PkmX
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+cabal-version:  >= 1.10
+
+library
+  hs-source-dirs:
+      src
+  ghc-options: -Wall -funfolding-use-threshold=20
+  build-depends:
+      base == 4.9.*
+    , deepseq == 1.4.*
+    , ghc-prim == 0.5.*
+    , template-haskell == 2.11.*
+  exposed-modules:
+      Data.Rawr
+  other-modules:
+      Paths_rawr
+  default-language: Haskell2010
+
+test-suite datasize
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs:
+      tests/datasize
+  ghc-options: -Wall
+  build-depends:
+      base == 4.9.*
+    , deepseq == 1.4.*
+    , rawr
+    , ghc-datasize == 0.1.*
+    , tasty == 0.11.*
+    , tasty-hunit == 0.9.*
+  default-language: Haskell2010
+
+test-suite doctest
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs:
+      tests/doctest
+  ghc-options: -Wall
+  build-depends:
+      base == 4.9.*
+    , deepseq == 1.4.*
+    , doctest == 0.11.*
+    , lens == 4.14.*
+  default-language: Haskell2010
+
+benchmark perf
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs:
+      benchmarks/perf
+  ghc-options: -Wall -funfolding-use-threshold=20
+  build-depends:
+      base == 4.9.*
+    , deepseq == 1.4.*
+    , rawr
+    , criterion == 1.1.*
+  default-language: Haskell2010
