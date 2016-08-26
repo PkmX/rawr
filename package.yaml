@@ -1,5 +1,5 @@
 name:                rawr
-version:             0.0.0.0
+version:             0.0.0.1
 synopsis:            Anonymous extensible records
 description: >
   This library provides anonymous extensible records using GHC 8.0 features, with the following goals/features:
