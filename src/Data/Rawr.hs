@@ -1246,9 +1246,9 @@ instance (r ~ RecPartition' 'GT (Rec xs) (Field s l t ': ys))
 --   = Rec
 --       '[Field 'Lazy ('Just "bar") Bool, Field 'Lazy ('Just "foo") Int]
 --
---   >>> :kind! R ( Field 'Lazy 'Nothing Int ) :*: ( Field 'Strict 'Nothing Bool )
---   R ( Field 'Lazy 'Nothing Int ) :*: ( Field 'Strict 'Nothing Bool ) :: GHC.Types.*
---   = Rec '[Field 'Lazy 'Nothing Int] :*: Field 'Strict 'Nothing Bool
+--   >>> :kind! R ( Field 'Lazy 'Nothing Int ) :*: R ( Field 'Strict 'Nothing Bool )
+--   R ( Field 'Lazy 'Nothing Int ) :*: R ( Field 'Strict 'Nothing Bool ) :: *
+--   = Rec '[Field 'Lazy 'Nothing Int, Field 'Strict 'Nothing Bool]
 type (:*:) x y = x `RecMerge` y
 infixr 1 :*:
 
