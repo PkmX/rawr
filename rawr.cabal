@@ -4,8 +4,22 @@
 
 name:           rawr
 version:        0.0.0.0
-synopsis:       Anonymous extensible records and variant types
-description:    See "Data.Rawr" for a tutorial of this library.
+synopsis:       Anonymous extensible records
+description:    This library provides anonymous extensible records using GHC 8.0 features, with the following goals/features:
+                .
+                    * The syntax should be very close to that of Haskell's record system.
+                .
+                    * The library should be simple to use and requires no extra boilerplate to setup.
+                .
+                    * There should be minimal runtime overhead and memory footprint.
+                .
+                    * The library does not require @TemplateHaskell@ to use.
+                .
+                    * It should produce good error messages.
+                .
+                    * Minimal dependencies. Currently, it only depends on packages that comes with GHC.
+                .
+                See @<https://hackage.haskell.org/package/rawr/docs/Data-Rawr.html Data.Rawr>@ for a tutorial of this library.
 category:       Records
 homepage:       https://github.com/pkmx/rawr
 author:         PkmX
@@ -15,6 +29,9 @@ license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
 cabal-version:  >= 1.10
+
+extra-source-files:
+    README.md
 
 library
   hs-source-dirs:

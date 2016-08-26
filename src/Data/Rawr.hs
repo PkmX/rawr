@@ -22,16 +22,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
--- | This package provides anonymous extensible records. The major features and goals of this library are:
---
---       * The syntax should be very close to that of Haskell's record system.
---       * The library should be simple to use and requires no extra boilerplate to setup.
---       * There should be minimal runtime overhead and memory footprint.
---       * The library does not require @TemplateHaskell@ to use.
---       * It should produce good error messages.
---       * Minimal dependencies. Currently, it only depends on packages that comes with GHC.
---
---   == Prerequisite
+-- | == Prerequisite
 --
 --   You need GHC >= 8.0 and the following extensions in order to use this library:
 --
