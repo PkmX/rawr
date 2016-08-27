@@ -45,14 +45,14 @@
 --
 --   >>> data FooHs = FooHs { a :: Int, b :: Bool }
 --
---   Note that the declaration order of fields doesn't matter. The library automatically sorts the fields by its labels, so the following two are equivalent:
+--   Note that the order of fields doesn't matter. The record automatically sorts its fields by labels during construction, so the following two are equivalent:
 --
 --   >>> Refl :: R ( "a" := Int, "b" := Bool ) :~: R ( "b" := Bool, "a" := Int )
 --   Refl
 --
 --   == Records
 --
---   The pattern 'R' is used to construct a value of type @Foo@:
+--   'R' is used to construct a value of type @Foo@:
 --
 --   >>> let foo = R ( #a := 42, #b := True ) :: Foo
 --
@@ -99,7 +99,7 @@
 --
 --   Due to the way van Laarhoven lenses are defined, this library does not need to depend on the @lens@ library, and you can use any of the alternative lens libraries that work with van Laarhoven lenses (@microlens@, @lens-family@, ..., etc).
 --
---   Using label lenses on a non-existent field is a type error:
+--   Using label lenses on a non-existent field is also a type error:
 --
 --   >>> foo ^. #c
 --   <BLANKLINE>
@@ -109,21 +109,21 @@
 --
 --   == Pattern Matching
 --
---   You can pattern match on records too! However, as overloaded labels aren't supported in patterns (as of GHC 8.0.1), you need to supply the type annotation manually:
+--   You can pattern match on records too! Unfortunately, as overloaded labels aren't supported in patterns (as of GHC 8.0.1), you need to supply the type annotation manually:
 --
 --   >>> case foo of R ( _ := b :: "b" := Bool, _ := a :: "a" := Int ) -> (a, b)
 --   (42,True)
 --
---   (Notice that the order is also insignificant here.)
+--   Notice that the order is also insignificant here.
 --
 --   === Pseudo row-polymorphism
 --
---   You can match parts of a record using 'P':
+--   You can match on parts of a record using 'P':
 --
 --   >>> case foo of r@(P ( _ := a :: "a" := Int )) -> r & #a .~ (a * 2)
 --   R ( a := 84, b := True )
 --
---   The difference is that 'R' needs to match all fields of a record, while 'P' doesn't.
+--   The difference is that while 'R' needs to match all fields of a record (as it is the inverse of constructing a record using `R`), 'P' doesn't.
 --
 --   With @PartialTypeSignatures@, you may omit the types of fields in the signature if they can be inferred from the usage:
 --
@@ -146,7 +146,7 @@
 --                       , #user := R ( #id := 456
 --                                    , #name := "testuser"
 --                                    )
---                       )
+--                       ) :: Post
 --       :}
 --
 --   Although the @id@ field is duplicated in both @User@ and @Post@, both selector labels and lenses are overloaded and will do the right thing™:
@@ -163,18 +163,18 @@
 --   >>> post & #user . #name %~ (<> "2")
 --   R ( content := "lorem ipsum", id := 123, user := R ( id := 456, name := "testuser2" ) )
 --
---   Examples of error messages:
+--   Examples of error messages with nested access via lenses:
 --
 --   >>> post ^. #user . #error
 --   <BLANKLINE>
 --   ... error:
---   ... Label "error" does not occur in R ( "id" := ..., "name" := [Char] )
+--   ... Label "error" does not occur in R ( "id" := Int, "name" := [Char] )
 --   ...
 --
 --   >>> post & #user . #error .~ "impossible"
 --   <BLANKLINE>
 --   ... error:
---   ... Label "error" does not occur in R ( "id" := ..., "name" := [Char] )
+--   ... Label "error" does not occur in R ( "id" := Int, "name" := [Char] )
 --   ...
 --
 --   == Extensible Records
@@ -229,6 +229,12 @@
 --   *** Exception: Prelude.undefined
 --   ...
 --
+--   >>> R ( #a := () ) & #a .~ undefined `seq` ()
+--   ()
+--   >>> R ( #a :=! () ) & #a .~ undefined `seq` ()
+--   *** Exception: Prelude.undefined
+--   ...
+--
 --   The current implementation of strict fields leaks the strictness info into the record's type. This implies that two records with same labels and types but different strictness properties aren't the same. (This may actually be a good thing?)
 --
 --   >>> Refl :: R ( "a" := () ) :~: R ( "a" :=! () )
@@ -239,7 +245,7 @@
 --
 --   == Newtype
 --
---   You can put records in a newtype, "giving" the record a name:
+--   You can put records in a newtype, thus "giving" the record a name:
 --
 --   >>> newtype Baz = Baz ( R ( "l" := Int ) )
 --   >>> let baz = Baz $ R ( #l := 1 )
@@ -426,7 +432,7 @@ class (:!!) s (l :: Symbol) a | s l -> a where
 -- >  data    instance Rec '[Field s0 l0 t0, Field s1 l1 t1] = R2 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1)
 -- >  ...
 --
--- The @UNPACK@ pragmas ensure that 'Field''s constructor is erased at runtime, thus the following record:
+-- The @UNPACK@ pragmas ensure that a 'Field''s constructor is erased at runtime, thus the following record:
 --
 -- >  Rec '[ "a" := Int, "b" := Bool, "c" := String ]
 --
@@ -442,11 +448,11 @@ class (:!!) s (l :: Symbol) a | s l -> a where
 --
 -- A record can be either:
 --
---   * A labeled record: All of its fields are labeled and its order sorted using `CmpSymbol`.
+--   * A labeled record: All of its fields are labeled and sorted using `CmpSymbol`.
 --
---   * An unlabeled record: All fields are unlabeled and indexed by their positions, and if all fields are lazy, they are isomorphic to Haskell tuples.
+--   * An unlabeled record: All fields are unlabeled and indexed by their positions. If all fields are lazy, they are isomorphic to Haskell tuples.
 --
--- Mixing labeled and unlabeled fields isn't allowed. This is enforced by the library's smart constructors.
+-- Mixing labeled and unlabeled fields isn't prohibited. This is enforced by the library's smart constructors.
 --
 -- 'Eq', 'Ord', 'Show', 'Monoid', 'NFData' instances are provided if all of the fields are also instances of respective classes.
 --
@@ -932,7 +938,7 @@ instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'No
 
 -- | When 'R' is used as a constructor, it is equivalent to the type family 'R', except that it operates at value-level.
 --
---   As a pattern, 'R' destructs all fields of a record into a tuple of 'Field's. In the case of labeled record, the 'Field's can be in arbitrarily order.
+--   As a pattern, 'R' destructs all fields of a record into a tuple of 'Field's. For labeled records, the 'Field's in the tuple may be in arbitrarily order.
 pattern R :: (r :~ RImpl t, t :~ UnRImpl r) => t -> r
 pattern R x <- (unR -> x) where
         R = toR
