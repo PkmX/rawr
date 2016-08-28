@@ -1159,81 +1159,69 @@ instance ( Rec ys' :~ RecConsImpl x (Rec ys)
   {-# INLINE recConsSnd #-}
   recConsSnd x (xs, ys) = (xs, x `recCons` ys)
 
-type family RecPartition (xs :: *) (ys :: [*]) = (r :: *) where
-  RecPartition (Rec '[]) (Field s 'Nothing t ': ys) = TypeError (Text "RecPartition: Not enough fields in the record")
-  RecPartition (Rec '[]) (Field s ('Just l) t ': ys) = TypeError (Text "RecPartition: Label " :<>: ShowType l :<>: Text " does not occur in the record")
-  RecPartition (Rec xs) '[] = (Rec '[], Rec xs)
-  RecPartition (Rec (Field sx ('Just lx) tx ': xs)) (Field sy ('Just ly) ty ': ys) = RecPartition' (CmpSymbol lx ly) (Rec (Field sx ('Just lx) tx ': xs)) (Field sy ('Just ly) ty ': ys)
-  RecPartition (Rec (Field s 'Nothing t  ': xs)) (Field s 'Nothing t ': ys) = RecConsFst (Field s 'Nothing t) (RecPartition (Rec xs) ys)
-  RecPartition (Rec (Field s 'Nothing tx ': xs)) (Field s 'Nothing ty ': ys) = TypeError (Text "RecPartition: type mismatch between " :<>: ShowType tx :<>: Text " and " :<>: ShowType ty)
+type family RecPartition (ls :: [Maybe Symbol]) (xs :: *) = (r :: *) where
+  RecPartition ('Nothing ': ls)  (Rec '[]) = TypeError (Text "RecPartition: Not enough fields in the record")
+  RecPartition ('Just l ': ls) (Rec '[]) = TypeError (Text "RecPartition: Label " :<>: ShowType l :<>: Text " does not occur in the record")
+  RecPartition '[] (Rec xs) = (Rec '[], Rec xs)
+  RecPartition ('Just ly ': ls) (Rec (Field sx ('Just lx) tx ': xs)) = RecPartition' (CmpSymbol lx ly) ('Just ly ': ls) (Rec (Field sx ('Just lx) tx ': xs))
+  RecPartition ('Nothing ': ls) (Rec (Field s 'Nothing t ': xs)) = RecConsFst (Field s 'Nothing t) (RecPartition ls (Rec xs))
 
-type family RecPartition' (ord :: Ordering) (xs :: *) (ys :: [*]) = (r :: *) where
-  RecPartition' 'EQ (Rec (Field s l t ': xs))          (Field s l t ': ys) = Field s l t `RecConsFst` RecPartition (Rec xs) ys
-  RecPartition' 'EQ (Rec (Field sx ('Just l) tx ': xs)) (Field sy ('Just l) ty ': ys) = TypeError (Text "RecParition: type mismatch between " :<>: ShowType tx :<>: Text " and " :<>: ShowType ty :<>: Text " for label " :<>: ShowType l)
-  RecPartition' 'LT (Rec (Field s l t ': xs))          ys = Field s l t `RecConsSnd` RecPartition (Rec xs) ys
-  RecPartition' 'GT (Rec xs)                           (Field s ('Just l) t ': ys) = TypeError (Text "RecPartition: Label " :<>: ShowType l :<>: Text " does not occur in the record")
+type family RecPartition' (ord :: Ordering) (ls :: [Maybe Symbol]) (xs :: *) = (r :: *) where
+  RecPartition' 'EQ (l ': ls) (Rec (Field s l t ': xs)) = Field s l t `RecConsFst` RecPartition ls (Rec xs)
+  RecPartition' 'LT ls (Rec (Field s l t ': xs)) = Field s l t `RecConsSnd` RecPartition ls (Rec xs)
+  RecPartition' 'GT ('Just l ': ls) (Rec xs) = TypeError (Text "RecPartition: Label " :<>: ShowType l :<>: Text " does not occur in the record")
 
-class (r ~ RecPartition xs ys) => RecPartitionImpl (xs :: *) (ys :: [*]) (r :: *) | xs ys -> r where
+class (r ~ RecPartition ls xs) => RecPartitionImpl (ls :: [Maybe Symbol]) (xs :: *) (r :: *) | ls xs -> r where
   recPartition :: xs -> r
 
-instance (r ~ RecPartition (Rec '[]) (Field s 'Nothing t ': ys)
-         ) => RecPartitionImpl (Rec '[]) (Field s 'Nothing t ': ys) r where
+instance (r ~ RecPartition ('Nothing ': ls)  (Rec '[])
+         ) => RecPartitionImpl ('Nothing ': ls)  (Rec '[]) r where
   recPartition = undefined
 
-instance (r ~ RecPartition (Rec '[]) (Field s ('Just l) t ': ys)
-         ) => RecPartitionImpl (Rec '[]) (Field s ('Just l) t ': ys) r where
+instance (r ~ RecPartition ('Just l ': ls) (Rec '[])
+         ) => RecPartitionImpl ('Just l ': ls) (Rec '[]) r where
   recPartition = undefined
 
-instance RecPartitionImpl (Rec xs) '[] (Rec '[], Rec xs) where
+instance RecPartitionImpl '[] (Rec xs) (Rec '[], Rec xs) where
   {-# INLINE recPartition #-}
   recPartition xs = (R0, xs)
 
-instance ( r :~ RecPartition'Impl (CmpSymbol lx ly) (Rec (Field sx ('Just lx) tx ': xs)) (Field sy ('Just ly) ty ': ys)
-         ) => RecPartitionImpl (Rec (Field sx ('Just lx) tx ': xs)) (Field sy ('Just ly) ty ': ys) r where
+instance ( r :~ RecPartition'Impl (CmpSymbol lx ly) ('Just ly ': ls) (Rec (Field sx ('Just lx) tx ': xs))
+         ) => RecPartitionImpl ('Just ly ': ls) (Rec (Field sx ('Just lx) tx ': xs)) r where
   {-# INLINE recPartition #-}
-  recPartition = recPartition' @(CmpSymbol lx ly) @(Rec (Field sx ('Just lx) tx ': xs)) @(Field sy ('Just ly) ty ': ys)
+  recPartition = recPartition' @(CmpSymbol lx ly) @('Just ly ': ls)
 
 instance {-# OVERLAPPING #-}
          ( Field s 'Nothing t :~ RecHeadImpl (Rec (Field s 'Nothing t ': xs))
          , Rec xs :~ RecTailImpl (Rec (Field s 'Nothing t ': xs))
-         , (Rec r0, Rec r1) :~ RecPartitionImpl (Rec xs) ys
+         , (Rec r0, Rec r1) :~ RecPartitionImpl ls (Rec xs)
          , r :~ RecConsFstImpl (Field s 'Nothing t) (Rec r0, Rec r1)
-         ) => RecPartitionImpl (Rec (Field s 'Nothing t ': xs)) (Field s 'Nothing t ': ys) r where
+         ) => RecPartitionImpl ('Nothing ': ls) (Rec (Field s 'Nothing t ': xs)) r where
   {-# INLINE recPartition #-}
-  recPartition xs = recConsFst (recHead xs) (recPartition @(Rec xs) @ys (recTail xs))
+  recPartition xs = recConsFst (recHead xs) (recPartition @ls (recTail xs))
 
-instance {-# OVERLAPPING #-}
-         (r ~ RecPartition (Rec (Field s 'Nothing tx ': xs)) (Field s 'Nothing ty ': ys)
-         ) => RecPartitionImpl (Rec (Field s 'Nothing tx ': xs)) (Field s 'Nothing ty ': ys) r where
-  recPartition = undefined
-
-class (r ~ RecPartition' ord xs ys) => RecPartition'Impl (ord :: Ordering) (xs :: *) (ys :: [*]) (r :: *) | ord xs ys -> r where
+class (r ~ RecPartition' ord ls xs) => RecPartition'Impl (ord :: Ordering) (ls :: [Maybe Symbol]) (xs :: *) (r :: *) | ord ls xs -> r where
   recPartition' :: xs -> r
 
 instance {-# OVERLAPPING #-}
          ( Field s l t :~ RecHeadImpl (Rec (Field s l t ': xs))
          , Rec xs :~ RecTailImpl (Rec (Field s l t ': xs))
-         , (Rec r0, Rec r1) :~ RecPartitionImpl (Rec xs) ys
+         , (Rec r0, Rec r1) :~ RecPartitionImpl ls (Rec xs)
          , r :~ RecConsFstImpl (Field s l t) (Rec r0, Rec r1)
-         ) => RecPartition'Impl 'EQ (Rec (Field s l t ': xs)) (Field s l t ': ys) r where
+         ) => RecPartition'Impl 'EQ (l ': ls) (Rec (Field s l t ': xs)) r where
   {-# INLINE recPartition' #-}
-  recPartition' xs = recHead xs `recConsFst` recPartition @(Rec xs) @ys (recTail xs)
-
-instance {-# OVERLAPPING #-}
-         ( r ~ RecPartition' 'EQ (Rec (Field sx l tx ': xs)) (Field sy l ty ': ys))
-         => RecPartition'Impl 'EQ (Rec (Field sx l tx ': xs)) (Field sy l ty ': ys) r where
-  recPartition' = undefined
+  recPartition' xs = recHead xs `recConsFst` recPartition @ls (recTail xs)
 
 instance ( Field s l t :~ RecHeadImpl (Rec (Field s l t ': xs))
          , Rec xs :~ RecTailImpl (Rec (Field s l t ': xs))
-         , (Rec r0, Rec r1) :~ RecPartitionImpl (Rec xs) ys
+         , (Rec r0, Rec r1) :~ RecPartitionImpl ls (Rec xs)
          , r :~ RecConsSndImpl (Field s l t) (Rec r0, Rec r1)
-         ) => RecPartition'Impl 'LT (Rec (Field s l t ': xs)) ys r where
+         ) => RecPartition'Impl 'LT ls (Rec (Field s l t ': xs)) r where
   {-# INLINE recPartition' #-}
-  recPartition' xs = recHead xs `recConsSnd` recPartition @(Rec xs) @ys (recTail xs)
+  recPartition' xs = recHead xs `recConsSnd` recPartition @ls (recTail xs)
 
-instance (r ~ RecPartition' 'GT (Rec xs) (Field s l t ': ys))
-         => RecPartition'Impl 'GT (Rec xs) (Field s l t ': ys) r where
+instance (r ~ RecPartition' 'GT ('Just l ': ls) (Rec xs))
+         => RecPartition'Impl 'GT ('Just l ': ls) (Rec xs) r where
   recPartition' = undefined
 
 -- | Merge two records types.
@@ -1249,8 +1237,9 @@ instance (r ~ RecPartition' 'GT (Rec xs) (Field s l t ': ys))
 type (:*:) x y = x `RecMerge` y
 infixr 1 :*:
 
-type family RecFieldList (xs :: *) = (r :: [*]) where
-  RecFieldList (Rec xs) = xs
+type family RecLabels (xs :: *) = (r :: [Maybe Symbol]) where
+  RecLabels (Rec '[]) = '[]
+  RecLabels (Rec (Field _ l _ ': xs)) = l ': RecLabels (Rec xs)
 
 -- | A utility constraint for you to write signatures involving `:*:`. For example, the following function that deletes the field with label @a@ has the signature:
 --
@@ -1258,9 +1247,9 @@ type family RecFieldList (xs :: *) = (r :: [*]) where
 --          let f :: (r :~ R ( "a" := Int ) ::*: ys) => r -> ys
 --              f (R ( _ :: "a" := Int) :*: ys) = ys
 --       :}
-class (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl r (RecFieldList xs)) => (::*:) xs ys r
+class (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl (RecLabels xs) r) => (::*:) xs ys r
 infix 1 ::*:
-instance (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl r (RecFieldList xs)) => (::*:) xs ys r
+instance (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl (RecLabels xs) r) => (::*:) xs ys r
 
 -- | === Constructor
 --
@@ -1313,17 +1302,17 @@ instance (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl r (RecFieldList 
 --   >>> case R ( #a := True, #b := (1 :: Int) ) of R ( _ :: "a" := Int ) :*: _ -> ()
 --   <BLANKLINE>
 --   ... error:
---   ... RecParition: type mismatch between Bool and Int for label "a"
+--   ... Couldn't match type ‘Int’ with ‘Bool’ arising from a pattern
 --   ...
 --
 --   >>> case R ( True, 1 :: Int ) of R ( a :: Int ) :*: _ -> ()
 --   <BLANKLINE>
 --   ... error:
---   ... RecPartition: type mismatch between Bool and Int
+--   ... Couldn't match type ‘Int’ with ‘Bool’ arising from a pattern
 --   ...
 
 pattern (:*:) :: forall xs ys r. (r :~ xs ::*: ys) => xs -> ys -> r
-pattern (:*:) xs ys <- (recPartition @r @(RecFieldList xs) -> (xs, ys)) where
+pattern (:*:) xs ys <- (recPartition @(RecLabels xs) -> (xs, ys)) where
         (:*:) xs ys = xs `recMerge` ys
 
 type family PPRec (r :: *) = (e :: ErrorMessage) where
