@@ -168,14 +168,12 @@
 --
 --   >>> post ^. #user . #error
 --   <BLANKLINE>
---   ...
 --   ... error:
 --   ... RecPartition: Label "error" does not occur in the record
 --   ...
 --
 --   >>> post & #user . #error .~ "impossible"
 --   <BLANKLINE>
---   ...
 --   ... error:
 --   ... RecPartition: Label "error" does not occur in the record
 --   ...
@@ -226,15 +224,15 @@
 --
 --   Constructing a record with a strict field bound to ⊥ is ⊥:
 --
---   >>> R ( #a := undefined ) `seq` ()
+--   >>> R ( #a := (undefined :: Int) ) `seq` ()
 --   ()
---   >>> R ( #a :=! undefined ) `seq` ()
+--   >>> R ( #a :=! (undefined :: Int) ) `seq` ()
 --   *** Exception: Prelude.undefined
 --   ...
 --
---   >>> R ( #a := () ) & #a .~ undefined `seq` ()
+--   >>> R ( #a := () ) & #a .~ (undefined :: Int) `seq` ()
 --   ()
---   >>> R ( #a :=! () ) & #a .~ undefined `seq` ()
+--   >>> R ( #a :=! () ) & #a .~ (undefined :: Int) `seq` ()
 --   *** Exception: Prelude.undefined
 --   ...
 --
@@ -285,7 +283,7 @@ module Data.Rawr
   -- ** Patterns for records
   , R, pattern R, pattern P
   -- ** Indexing records
-  , (:!!)(..)
+  , (:!!)(..), rat, pattern X
   -- ** Merging & partitioning records
   , (:*:), pattern (:*:)
   , (::*:)
@@ -295,6 +293,7 @@ module Data.Rawr
 
 import Control.DeepSeq
 import Data.Proxy
+import Data.Void
 import GHC.Generics (Generic)
 import GHC.TypeLits
 import GHC.Types
@@ -430,6 +429,9 @@ instance ((Rec '[Field (FieldStrictness s l) ('Just l) a], unused) :~ RecPartiti
   rlens f s = (\b -> setField @s @l @a @b s b) <$> f (get @s @l s)
   get (recPartition @('[ 'Just l ]) -> (R1 (unField -> a), _)) = a
 
+rat :: forall l s t a b. (a :~ GetFieldImpl s l, t :~ SetFieldImpl s l a b) => Proxy l -> Lens s t a b
+rat _ f s = (\b -> setField @s @l @a @b s b) <$> f (getField @s @l s)
+
 type family Snd (t :: *) = (r :: *) where
   Snd (_, b) = b
 
@@ -437,19 +439,113 @@ type family FieldStrictness (xs :: *) (l :: Symbol) = (r :: Strictness) where
   FieldStrictness (Rec (Field s ('Just l) _ ': _)) l = s
   FieldStrictness (Rec (Field _ ('Just l') _ ': xs)) l = FieldStrictness (Rec xs) l
 
+type family GetField (s :: *) (l :: Symbol) = (r :: *) where
+  GetField (Rec '[]) _ = Void
+  GetField (Rec (Field s ('Just l) t ': xs)) l = t
+  GetField (Rec (Field s ('Just l) t ': xs)) l' = GetField (Rec xs) l'
+
+class (r ~ GetField s l) => GetFieldImpl (s :: *) (l :: Symbol) (r :: *) | s l -> r where
+  getField :: s -> r
+
+instance GetFieldImpl (Rec '[]) l Void where
+  getField R0 = X
+
+instance {-# OVERLAPPING #-}
+         ( Field s ('Just l) t :~ RecHeadImpl (Rec (Field s ('Just l) t ': xs))
+         ) => GetFieldImpl (Rec (Field s ('Just l) t ': xs)) l t where
+  getField = unField . recHead
+
+instance ( Rec xs :~ RecTailImpl (Rec (Field s ('Just l) t ': xs))
+         , r :~ GetFieldImpl (Rec xs) l'
+         , r ~ GetField (Rec (Field s ('Just l) t ': xs)) l'
+         ) => GetFieldImpl (Rec (Field s ('Just l) t ': xs)) l' r where
+  getField = getField @(Rec xs) @l' . recTail
+
+type family AddField (s :: *) (l :: Symbol) (a :: *) = (r :: *) where
+  AddField (Rec '[]) l a = Rec '[Field 'Lazy ('Just l) a]
+  AddField (Rec (Field s ('Just l) t ': xs)) l' a = AddField' (CmpSymbol l l') (Rec (Field s ('Just l) t ': xs)) l' a
+
+type family AddField' (ord :: Ordering) (s :: *) (l :: Symbol) (a :: *) = (r :: *) where
+  AddField' 'EQ (Rec (Field s ('Just l) t ': xs)) l a = Field s ('Just l) a `RecCons` Rec xs
+  AddField' 'LT (Rec (Field s ('Just l) t ': xs)) l' a = Field s ('Just l) t `RecCons` AddField (Rec xs) l' a
+  AddField' 'GT (Rec xs) l' a = Field 'Lazy ('Just l') a `RecCons` Rec xs
+
+class (r ~ AddField s l a) => AddFieldImpl (s :: *) (l :: Symbol) (a :: *) (r :: *) | s l a -> r where
+  addField :: s -> a -> r
+
+instance (r ~ Rec '[Field 'Lazy ('Just l) a]) => AddFieldImpl (Rec '[]) l a r where
+  addField R0 a = R1 (Field @'Lazy @('Just l) a)
+
+instance ( r :~ AddField'Impl (CmpSymbol l l') (Rec (Field s ('Just l) t ': xs)) l' a
+         ) => AddFieldImpl (Rec (Field s ('Just l) t ': xs)) l' a r where
+  addField = addField' @(CmpSymbol l l') @(Rec (Field s ('Just l) t ': xs)) @l'
+
+class (r ~ AddField' ord s l a) => AddField'Impl (ord :: Ordering) (s :: *) (l :: Symbol) (a :: *) (r :: *) | ord s l a -> r where
+  addField' :: s -> a -> r
+
+instance ( Field s ('Just l) a :~ MkField a
+         , Rec xs :~ RecTailImpl (Rec (Field s ('Just l) t ': xs))
+         , r :~ Field s ('Just l) a `RecConsImpl` Rec xs
+         ) => AddField'Impl 'EQ (Rec (Field s ('Just l) t ': xs)) l a r where
+  addField' s a = Field @s @('Just l) a `recCons` recTail s
+
+instance ( Field s ('Just l) t :~ RecHeadImpl (Rec (Field s ('Just l) t ': xs))
+         , Rec xs :~ RecTailImpl (Rec (Field s ('Just l) t ': xs))
+         , r' :~ AddFieldImpl (Rec xs) l' a
+         , r :~ Field s ('Just l) t `RecConsImpl` r'
+         ) => AddField'Impl 'LT (Rec (Field s ('Just l) t ': xs)) l' a r where
+  addField' s a = recHead s `recCons` addField @(Rec xs) @l' (recTail s) a
+
+instance ( Field s ('Just l') a :~ MkField a
+         , r :~ Field s ('Just l') a `RecConsImpl` Rec xs
+         , r ~ AddField' 'GT (Rec xs) l' a
+         ) => AddField'Impl 'GT (Rec xs) l' a r where
+  addField' s a = Field @s @('Just l') a `recCons` s
+
+type family DelField (s :: *) (l :: Symbol) where
+  DelField (Rec '[]) _ = Rec '[]
+  DelField (Rec (Field s ('Just l) t ': xs)) l = Rec xs
+  DelField (Rec (Field s ('Just l) t ': xs)) l' = DelField (Rec xs) l'
+
+class (r ~ DelField s l) => DelFieldImpl (s :: *) (l :: Symbol) (r :: *) | s l -> r where
+  delField :: s -> r
+
+instance DelFieldImpl (Rec '[]) l (Rec '[]) where
+  delField = id
+
+instance {-# OVERLAPPING #-}
+         ( Rec xs :~ RecTailImpl (Rec (Field s ('Just l) t ': xs))
+         ) => DelFieldImpl (Rec (Field s ('Just l) t ': xs)) l (Rec xs) where
+  delField = recTail
+
+instance {-# OVERLAPPING #-}
+         ( Rec xs :~ RecTailImpl (Rec (Field s ('Just l) t ': xs))
+         , r :~ DelFieldImpl (Rec xs) l'
+         , r ~ DelField (Rec (Field s ('Just l) t ': xs)) l'
+         ) => DelFieldImpl (Rec (Field s ('Just l) t ': xs)) l' r where
+  delField = delField @(Rec xs) @l' . recTail
+
 type family SetField (s :: *) (l :: Symbol) (a :: *) (b :: *) = (r :: *) where
-  SetField s l a b = R (Field (FieldStrictness s l) ('Just l) b) :*: Snd (RecPartition '[ 'Just l ] s)
+  SetField s l _ Void = DelField s l
+  SetField s l _ b    = AddField s l b
 
 class (r ~ SetField s l a b) => SetFieldImpl (s :: *) (l :: Symbol) (a :: *) (b :: *) (r :: *) | s l a b -> r where
   setField :: s -> b -> r
 
-instance ( Field (FieldStrictness s l) ('Just l) b :~ MkField b
-         , lhs :~ RImpl (Field (FieldStrictness s l) ('Just l) b)
-         , (r', rhs) :~ RecPartitionImpl '[ 'Just l ] s
-         , r :~ lhs ::*: rhs
+instance {-# OVERLAPPING #-}
+         ( r :~ DelFieldImpl s l
+         ) => SetFieldImpl s l a Void r where
+  setField s _ = delField @s @l s
+
+instance {-# OVERLAPPING #-}
+         ( r :~ AddFieldImpl s l b
          , r ~ SetField s l a b
          ) => SetFieldImpl s l a b r where
-  setField s b = toR (Field b :: Field (FieldStrictness s l) ('Just l) b) :*: snd (recPartition @('[ 'Just l ]) s)
+  setField = addField @s @l
+
+pattern X :: Void
+pattern X <- (absurd -> ()) where
+        X = undefined
 
 -- $records
 -- A record is internally represented as a data family indexed by a list of 'Field':
