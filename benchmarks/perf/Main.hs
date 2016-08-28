@@ -5,7 +5,6 @@
 
 module Main (main) where
 
-import Control.DeepSeq
 import Criterion.Main
 import Data.Rawr
 
@@ -23,7 +22,7 @@ main =
         ]
     , bgroup "select"
         [ bench "rawr" $ nf #e (R ( #a := (), #b := (), #c := (), #d := (), #e := () ))
-        , bench "handwritten" $ nf (\(a, b, c, d, e) -> e) ( #a := (), #b := (), #c := (), #d := (), #e := () )
+        , bench "handwritten" $ nf (\(_, _, _, _, e) -> e) ( #a := (), #b := (), #c := (), #d := (), #e := () )
         ]
     , bgroup "merge"
         [ bench "rawr" $ nf (uncurry (:*:)) (R ( #a := (), #e := () ), R ( #b := (), #c := (), #d := () ))
