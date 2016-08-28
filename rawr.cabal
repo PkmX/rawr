@@ -41,7 +41,6 @@ library
       base == 4.9.*
     , deepseq == 1.4.*
     , ghc-prim == 0.5.*
-    , template-haskell == 2.11.*
   exposed-modules:
       Data.Rawr
   other-modules:

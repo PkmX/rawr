@@ -37,7 +37,6 @@ library:
   exposed-modules: Data.Rawr
   dependencies:
     - ghc-prim == 0.5.*
-    - template-haskell == 2.11.*
 
 tests:
   doctest:

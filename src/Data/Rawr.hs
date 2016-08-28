@@ -7,6 +7,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -15,7 +16,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -87,7 +87,7 @@
 --   >>> #c foo
 --   <BLANKLINE>
 --   ... error:
---   ... Label "c" does not occur in R ( "a" := Int, "b" := Bool )
+--   ... RecPartition: Label "c" does not occur in the record
 --   ...
 --
 --   == Lenses
@@ -103,8 +103,9 @@
 --
 --   >>> foo ^. #c
 --   <BLANKLINE>
+--   ...
 --   ... error:
---   ... Label "c" does not occur in R ( "a" := Int, "b" := Bool )
+--   ... RecPartition: Label "c" does not occur in the record
 --   ...
 --
 --   == Pattern Matching
@@ -167,14 +168,16 @@
 --
 --   >>> post ^. #user . #error
 --   <BLANKLINE>
+--   ...
 --   ... error:
---   ... Label "error" does not occur in R ( "id" := Int, "name" := [Char] )
+--   ... RecPartition: Label "error" does not occur in the record
 --   ...
 --
 --   >>> post & #user . #error .~ "impossible"
 --   <BLANKLINE>
+--   ...
 --   ... error:
---   ... Label "error" does not occur in R ( "id" := Int, "name" := [Char] )
+--   ... RecPartition: Label "error" does not occur in the record
 --   ...
 --
 --   == Extensible Records
@@ -291,14 +294,11 @@ module Data.Rawr
   ) where
 
 import Control.DeepSeq
-import Data.Functor.Const
-import Data.Foldable
 import Data.Proxy
 import GHC.Generics (Generic)
 import GHC.TypeLits
 import GHC.Types
 import GHC.OverloadedLabels
-import Language.Haskell.TH hiding (Strict)
 
 -- | A helper type synonym to convert functional dependencies into nicer type-equality-like syntax.
 --
@@ -408,20 +408,44 @@ instance (KnownSymbol l, Show t) => Show (Field 'Strict ('Just l) t) where
 instance Show t => Show (Field s 'Nothing t) where
   show (MkField t) = show t
 
-type Lens' s a = forall f. Functor f => (a -> f a) -> s -> f s
-
-view :: Lens' s a -> s -> a
-view l = getConst . l Const
+type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 
 instance l ~ l' => IsLabel (l :: Symbol) (Proxy l') where
   fromLabel _ = Proxy
 
--- | @(:!!) s l a@ says that the record @s@ has a field of type @a@ at index @l@, and provides a @Lens' s a@ to get/set that particular field.
+-- | @(:!!) s l a@ says that the record @s@ has a field of type @a@ at index @l@, and provides a @Lens s t a b@ to get/set that particular field.
 --
 --   If you are thinking that the syntax is ugly, we can use the utility operator `:~` to write @a :~ (s :!! l)@ which can be read as the equality constraint @a ~ (s !! t)@. Nice!
 --
 class (:!!) s (l :: Symbol) a | s l -> a where
-  fieldLens :: Lens' s a
+  rlens :: forall t b. (t :~ SetFieldImpl s l a b) => Lens s t a b
+  get :: s -> a
+
+instance ((Rec '[Field (FieldStrictness s l) ('Just l) a], unused) :~ RecPartitionImpl '[ 'Just l ] s) => (:!!) s l a where
+  rlens :: forall t b. (t :~ SetFieldImpl s l a b) => Lens s t a b
+  rlens f s = (\b -> setField @s @l @a @b s b) <$> f (get @s @l s)
+  get (recPartition @('[ 'Just l ]) -> (R1 (unField -> a), _)) = a
+
+type family Snd (t :: *) = (r :: *) where
+  Snd (_, b) = b
+
+type family FieldStrictness (xs :: *) (l :: Symbol) = (r :: Strictness) where
+  FieldStrictness (Rec (Field s ('Just l) _ ': _)) l = s
+  FieldStrictness (Rec (Field _ ('Just l') _ ': xs)) l = FieldStrictness (Rec xs) l
+
+type family SetField (s :: *) (l :: Symbol) (a :: *) (b :: *) = (r :: *) where
+  SetField s l a b = R (Field (FieldStrictness s l) ('Just l) b) :*: Snd (RecPartition '[ 'Just l ] s)
+
+class (r ~ SetField s l a b) => SetFieldImpl (s :: *) (l :: Symbol) (a :: *) (b :: *) (r :: *) | s l a b -> r where
+  setField :: s -> b -> r
+
+instance ( Field (FieldStrictness s l) ('Just l) b :~ WrapInField b
+         , lhs :~ RImpl (Field (FieldStrictness s l) ('Just l) b)
+         , (r', rhs) :~ RecPartitionImpl '[ 'Just l ] s
+         , r :~ lhs ::*: rhs
+         , r ~ SetField s l a b
+         ) => SetFieldImpl s l a b r where
+  setField s b = toR (wrapInField b :: Field (FieldStrictness s l) ('Just l) b) :*: snd (recPartition @('[ 'Just l ]) s)
 
 -- $records
 -- A record is internally represented as a data family indexed by a list of 'Field':
@@ -475,29 +499,6 @@ data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field
   R7 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2) {-# UNPACK #-} !(Field s3 l3 t3) {-# UNPACK #-} !(Field s4 l4 t4) {-# UNPACK #-} !(Field s5 l5 t5) {-# UNPACK #-} !(Field s6 l6 t6)
 data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 , Field s5 l5 t5 , Field s6 l6 t6 , Field s7 l7 t7 ] =
   R8 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2) {-# UNPACK #-} !(Field s3 l3 t3) {-# UNPACK #-} !(Field s4 l4 t4) {-# UNPACK #-} !(Field s5 l5 t5) {-# UNPACK #-} !(Field s6 l6 t6) {-# UNPACK #-} !(Field s7 l7 t7)
-
-$(
-  return $ do
-    let s = VarT (mkName "s")
-        l = VarT (mkName "l")
-        t = VarT (mkName "t")
-        mkField s' l' t' = ConT ''Field  `AppT` s' `AppT` (ConT 'Just `AppT` l') `AppT` t'
-        fieldslt = mkField s l t
-        f = mkName "f"
-        x = mkName "x"
-        x' = mkName "x'"
-        cxt = [ConT ''WrapInField `AppT` t `AppT` fieldslt]
-    n :: Integer <- [1 .. 8]
-    i <- [1 .. n]
-    let recList = [ if i == i' then fieldslt else mkField (VarT (mkName ("s" ++ show i'))) (VarT (mkName ("l" ++ show i'))) (VarT (mkName ("t" ++ show i'))) | i' <- [1 .. n] ]
-        recTy = ConT ''Rec `AppT` foldr (\t ts -> (PromotedConsT `AppT` t) `AppT` ts) PromotedNilT recList
-        ty = ConT ''(:!!) `AppT` recTy `AppT` l `AppT` t
-        rPat = ConP (mkName ("R" ++ show n)) [ if i == i' then ConP 'MkField [VarP x] else VarP (mkName ("_" ++ show i')) | i' <- [1 .. n] ]
-        rExp = foldl' AppE (ConE (mkName ("R" ++ show n))) [ if i == i' then AppE (VarE 'wrapInField) (VarE x') else VarE (mkName ("_" ++ show i')) | i' <- [1 .. n] ]
-        body = NormalB $ UInfixE (LamE [VarP x'] rExp) (VarE '(<$>)) (VarE f `AppE` VarE x)
-        fieldLensFn = FunD 'fieldLens [Clause [VarP (mkName "f"), rPat] body []]
-    return $ InstanceD Nothing cxt ty [fieldLensFn]
- )
 
 instance Show (Rec '[]) where
   show _ = "R ()"
@@ -620,17 +621,12 @@ instance (Monoid t0, Monoid t1, Monoid t2, Monoid t3, Monoid t4, Monoid t5, Mono
   mempty = R8 mempty mempty mempty mempty mempty mempty mempty mempty
   R8 a b c d e f g h `mappend` R8 a' b' c' d' e' f' g' h' = R8 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f') (g `mappend` g') (h `mappend` h')
 
-instance {-# OVERLAPPABLE #-}
-         ( a ~ TypeError (Text "Label " :<>: ShowType l :<>: Text " does not occur in " :<>: PPRec s)
-         ) => (:!!) s l a where
-  fieldLens = undefined
-
 -- Need s2fs ~ (s -> f s) for better type inference
-instance {-# OVERLAPPING #-} (a :~ s :!! l, Functor f, a ~ b, s2fs ~ (s -> f s)) => IsLabel (l :: Symbol) ((a -> f b) -> s2fs) where
-  fromLabel _ = fieldLens @s @l
+instance {-# OVERLAPPING #-} (a :~ s :!! l, Functor f, s2ft ~ (s -> f t), t :~ SetFieldImpl s l a b) => IsLabel (l :: Symbol) ((a -> f b) -> s2ft) where
+  fromLabel _ = rlens @s @l @a @t @b
 
 instance {-# OVERLAPPING #-} (a :~ Rec xs :!! l) => IsLabel (l :: Symbol) (Rec xs -> a) where
-  fromLabel _ = view (fieldLens @(Rec xs) @l)
+  fromLabel _ = get @(Rec xs) @l @a
 
 type family ToField (a :: *) = (r :: *) where
   ToField (Field s l t) = Field s l t
@@ -669,7 +665,7 @@ instance {-# OVERLAPPING #-} (r ~ Field 'Lazy 'Nothing a, r ~ ToField a) => ToFi
 --   >>> case R () of R ( _ :: "a" := Int ) -> ()
 --   <BLANKLINE>
 --   ... error:
---   ... Label "a" does not occur in R ()
+--   ... RecPartition: Label "a" does not occur in the record
 --   ...
 --
 type family R (t :: *) = (r :: *) where
@@ -811,70 +807,70 @@ class UnRImpl r t where
 instance UnRImpl r () where
   unR _ = ()
 
-type ReWrap r s l t = ( t :~ r :!! l, Field s ('Just l) t :~ WrapInField t)
+type ReWrap r s l t = ( t :~ r :!! l, r :~ SetFieldImpl r l t t, Field s ('Just l) t :~ WrapInField t )
 
 instance (ReWrap r s0 l0 t0) => UnRImpl r (Field s0 ('Just l0) t0) where
-  unR r = wrapInField $ view (fieldLens @r @l0) r
+  unR r = wrapInField $ get @r @l0 @t0 r
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1) => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1) where
-  unR r = ( wrapInField $ view (fieldLens @r @l0) r
-          , wrapInField $ view (fieldLens @r @l1) r
+  unR r = ( wrapInField $ get @r @l0 @t0 r
+          , wrapInField $ get @r @l1 @t1 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2) => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2) where
-  unR r = ( wrapInField $ view (fieldLens @r @l0) r
-          , wrapInField $ view (fieldLens @r @l1) r
-          , wrapInField $ view (fieldLens @r @l2) r
+  unR r = ( wrapInField $ get @r @l0 @t0 r
+          , wrapInField $ get @r @l1 @t1 r
+          , wrapInField $ get @r @l2 @t2 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3) where
-  unR r = ( wrapInField $ view (fieldLens @r @l0) r
-          , wrapInField $ view (fieldLens @r @l1) r
-          , wrapInField $ view (fieldLens @r @l2) r
-          , wrapInField $ view (fieldLens @r @l3) r
+  unR r = ( wrapInField $ get @r @l0 @t0 r
+          , wrapInField $ get @r @l1 @t1 r
+          , wrapInField $ get @r @l2 @t2 r
+          , wrapInField $ get @r @l3 @t3 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4) where
-  unR r = ( wrapInField $ view (fieldLens @r @l0) r
-          , wrapInField $ view (fieldLens @r @l1) r
-          , wrapInField $ view (fieldLens @r @l2) r
-          , wrapInField $ view (fieldLens @r @l3) r
-          , wrapInField $ view (fieldLens @r @l4) r
+  unR r = ( wrapInField $ get @r @l0 @t0 r
+          , wrapInField $ get @r @l1 @t1 r
+          , wrapInField $ get @r @l2 @t2 r
+          , wrapInField $ get @r @l3 @t3 r
+          , wrapInField $ get @r @l4 @t4 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4, ReWrap r s5 l5 t5)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4, Field s5 ('Just l5) t5) where
-  unR r = ( wrapInField $ view (fieldLens @r @l0) r
-          , wrapInField $ view (fieldLens @r @l1) r
-          , wrapInField $ view (fieldLens @r @l2) r
-          , wrapInField $ view (fieldLens @r @l3) r
-          , wrapInField $ view (fieldLens @r @l4) r
-          , wrapInField $ view (fieldLens @r @l5) r
+  unR r = ( wrapInField $ get @r @l0 @t0 r
+          , wrapInField $ get @r @l1 @t1 r
+          , wrapInField $ get @r @l2 @t2 r
+          , wrapInField $ get @r @l3 @t3 r
+          , wrapInField $ get @r @l4 @t4 r
+          , wrapInField $ get @r @l5 @t5 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4, ReWrap r s5 l5 t5, ReWrap r s6 l6 t6)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4, Field s5 ('Just l5) t5, Field s6 ('Just l6) t6) where
-  unR r = ( wrapInField $ view (fieldLens @r @l0) r
-          , wrapInField $ view (fieldLens @r @l1) r
-          , wrapInField $ view (fieldLens @r @l2) r
-          , wrapInField $ view (fieldLens @r @l3) r
-          , wrapInField $ view (fieldLens @r @l4) r
-          , wrapInField $ view (fieldLens @r @l5) r
-          , wrapInField $ view (fieldLens @r @l6) r
+  unR r = ( wrapInField $ get @r @l0 @t0 r
+          , wrapInField $ get @r @l1 @t1 r
+          , wrapInField $ get @r @l2 @t2 r
+          , wrapInField $ get @r @l3 @t3 r
+          , wrapInField $ get @r @l4 @t4 r
+          , wrapInField $ get @r @l5 @t5 r
+          , wrapInField $ get @r @l6 @t6 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4, ReWrap r s5 l5 t5, ReWrap r s6 l6 t6, ReWrap r s7 l7 t7)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4, Field s5 ('Just l5) t5, Field s6 ('Just l6) t6, Field s7 ('Just l7) t7) where
-  unR r = ( wrapInField $ view (fieldLens @r @l0) r
-          , wrapInField $ view (fieldLens @r @l1) r
-          , wrapInField $ view (fieldLens @r @l2) r
-          , wrapInField $ view (fieldLens @r @l3) r
-          , wrapInField $ view (fieldLens @r @l4) r
-          , wrapInField $ view (fieldLens @r @l5) r
-          , wrapInField $ view (fieldLens @r @l6) r
-          , wrapInField $ view (fieldLens @r @l7) r
+  unR r = ( wrapInField $ get @r @l0 @t0 r
+          , wrapInField $ get @r @l1 @t1 r
+          , wrapInField $ get @r @l2 @t2 r
+          , wrapInField $ get @r @l3 @t3 r
+          , wrapInField $ get @r @l4 @t4 r
+          , wrapInField $ get @r @l5 @t5 r
+          , wrapInField $ get @r @l6 @t6 r
+          , wrapInField $ get @r @l7 @t7 r
           )
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0]) t0 where
