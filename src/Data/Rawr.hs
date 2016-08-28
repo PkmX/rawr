@@ -31,7 +31,7 @@
 --
 --   as well as a few imports and extensions that will be used throughout this tutorial (but are not required to use this library):
 --
---   >>> :set -XBangPatterns -XTypeFamilies
+--   >>> :set -XBangPatterns -XTypeFamilies -XTypeApplications
 --   >>> import Control.Lens ((^.), (.~), (%~), (&))
 --   >>> :m + Data.Monoid Data.Type.Equality
 --
@@ -277,9 +277,9 @@
 module Data.Rawr
   (
   -- * Fields
-    Strictness(..), Field(..), (:=), (:=!)
+    Strictness(..), Field(), (:=), (:=!)
   -- ** Patterns for fields
-  , pattern (:=), pattern (:=!), pattern Field, pattern Field'
+  , pattern Field, pattern (:=), pattern (:=!), pattern Field'
   -- * Records
   -- $records
   -- ** Patterns for records
@@ -322,22 +322,34 @@ data Strictness = Lazy | Strict
 --   >>> :kind Field
 --   Field :: Strictness -> Maybe Symbol -> * -> *
 --
-data Field (s :: Strictness) (l :: Maybe Symbol) t = MkField { unField :: t } deriving (Eq, Ord, Generic, NFData)
+data Field (s :: Strictness) (l :: Maybe Symbol) t = Field_ { unField :: t } deriving (Eq, Ord, Generic, NFData)
 
-instance (Monoid t) => Monoid (Field s l t) where
-  mempty = MkField mempty
-  MkField x `mappend` MkField y = MkField (x `mappend` y)
+instance (Monoid t) => Monoid (Field 'Lazy l t) where
+  mempty = Field mempty
+  Field x `mappend` Field y = Field (x `mappend` y)
 
-class WrapInField t f where
-  wrapInField :: t -> f
+instance (Monoid t) => Monoid (Field 'Strict l t) where
+  mempty = Field $! mempty
+  Field x `mappend` Field y = Field $! (x `mappend` y)
 
-instance WrapInField t (Field 'Lazy l t) where
-  {-# INLINE wrapInField #-}
-  wrapInField t = MkField t
+class MkField t f where
+  mkField :: t -> f
 
-instance WrapInField t (Field 'Strict l t) where
-  {-# INLINE wrapInField #-}
-  wrapInField !t = MkField t
+instance MkField t (Field 'Lazy l t) where
+  {-# INLINE mkField #-}
+  mkField t = Field_ t
+
+instance MkField t (Field 'Strict l t) where
+  {-# INLINE mkField #-}
+  mkField !t = Field_ t
+
+-- | Construct or pattern match on a 'Field'.
+--
+--   >>> :t Field @'Lazy @'Nothing True
+--   Field @'Lazy @'Nothing True :: Field 'Lazy 'Nothing Bool
+pattern Field :: (Field s l t :~ MkField t) => t -> Field s l t
+pattern Field x <- (Field_ x) where
+        Field = mkField
 
 -- | A labeled lazy field.
 --
@@ -363,26 +375,18 @@ infix 2 :=!
 --   >>> :t #foo := True
 --   #foo := True :: Field 'Lazy ('Just "foo") Bool
 pattern (:=) :: KnownSymbol l => Proxy l -> t -> Field 'Lazy ('Just l) t
-pattern p := t <- ((\(MkField t) -> (Proxy :: Proxy l, t)) -> (p, t)) where
-  _ := t = MkField t
+pattern p := t <- ((\(Field t) -> (Proxy :: Proxy l, t)) -> (p, t)) where
+  _ := t = Field t
 
 -- | Construct or pattern-match a strict labeled field.
 --
 --   >>> :t #foo :=! True
 --   #foo :=! True :: Field 'Strict ('Just "foo") Bool
 pattern (:=!) :: KnownSymbol l => Proxy l -> t -> Field 'Strict ('Just l) t
-pattern p :=! t <- ((\(MkField t) -> (Proxy :: Proxy l, t)) -> (p, t)) where
-  _ :=! (!t) = MkField t
+pattern p :=! t <- ((\(Field t) -> (Proxy :: Proxy l, t)) -> (p, t)) where
+  _ :=! t = Field t
 
--- | Construct or pattern-match a lazy unlabeled field.
---
---   >>> :t Field True
---   Field True :: Field 'Lazy 'Nothing Bool
-pattern Field :: t -> Field 'Lazy 'Nothing t
-pattern Field t <- (unField -> t) where
-  Field t = MkField t
-
--- | Strict version of `Field`.
+-- | Construct or pattern-match a strict unlabeled field.
 --
 --   >>> :t Field' True
 --   Field' True :: Field 'Strict 'Nothing Bool
@@ -397,7 +401,7 @@ pattern Field t <- (unField -> t) where
 --   ...
 pattern Field' :: t -> Field 'Strict 'Nothing t
 pattern Field' t <- (unField -> t) where
-  Field' !t = MkField t
+  Field' t = Field t
 
 instance (KnownSymbol l, Show t) => Show (Field 'Lazy ('Just l) t) where
   show (l := t) = symbolVal l ++ " := " ++ show t
@@ -406,7 +410,7 @@ instance (KnownSymbol l, Show t) => Show (Field 'Strict ('Just l) t) where
   show (l :=! t) = symbolVal l ++ " :=! " ++ show t
 
 instance Show t => Show (Field s 'Nothing t) where
-  show (MkField t) = show t
+  show (unField -> t) = show t
 
 type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 
@@ -439,13 +443,13 @@ type family SetField (s :: *) (l :: Symbol) (a :: *) (b :: *) = (r :: *) where
 class (r ~ SetField s l a b) => SetFieldImpl (s :: *) (l :: Symbol) (a :: *) (b :: *) (r :: *) | s l a b -> r where
   setField :: s -> b -> r
 
-instance ( Field (FieldStrictness s l) ('Just l) b :~ WrapInField b
+instance ( Field (FieldStrictness s l) ('Just l) b :~ MkField b
          , lhs :~ RImpl (Field (FieldStrictness s l) ('Just l) b)
          , (r', rhs) :~ RecPartitionImpl '[ 'Just l ] s
          , r :~ lhs ::*: rhs
          , r ~ SetField s l a b
          ) => SetFieldImpl s l a b r where
-  setField s b = toR (wrapInField b :: Field (FieldStrictness s l) ('Just l) b) :*: snd (recPartition @('[ 'Just l ]) s)
+  setField s b = toR (Field b :: Field (FieldStrictness s l) ('Just l) b) :*: snd (recPartition @('[ 'Just l ]) s)
 
 -- $records
 -- A record is internally represented as a data family indexed by a list of 'Field':
@@ -586,37 +590,37 @@ instance Monoid (Rec '[]) where
   mempty = R0
   _ `mappend` _ = R0
 
-instance (Monoid t0) => Monoid (Rec '[Field s0 l0 t0]) where
+instance (Monoid (Field s0 l0 t0)) => Monoid (Rec '[Field s0 l0 t0]) where
   mempty = R1 mempty
   R1 a `mappend` R1 a' = R1 (a `mappend` a')
 
-instance (Monoid t0, Monoid t1) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1]) where
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1]) where
   mempty = R2 mempty mempty
   R2 a b `mappend` R2 a' b' = R2 (a `mappend` a') (b `mappend` b')
 
-instance (Monoid t0, Monoid t1, Monoid t2) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2]) where
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2]) where
   mempty = R3 mempty mempty mempty
   R3 a b c `mappend` R3 a' b' c' = R3 (a `mappend` a') (b `mappend` b') (c `mappend` c')
 
-instance (Monoid t0, Monoid t1, Monoid t2, Monoid t3) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3]) where
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3]) where
   mempty = R4 mempty mempty mempty mempty
   R4 a b c d `mappend` R4 a' b' c' d' = R4 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d')
 
-instance (Monoid t0, Monoid t1, Monoid t2, Monoid t3, Monoid t4) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4]) where
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4]) where
   mempty = R5 mempty mempty mempty mempty mempty
   R5 a b c d e `mappend` R5 a' b' c' d' e' = R5 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e')
 
-instance (Monoid t0, Monoid t1, Monoid t2, Monoid t3, Monoid t4, Monoid t5) =>
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4), Monoid (Field s5 l5 t5)) =>
          Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5]) where
   mempty = R6 mempty mempty mempty mempty mempty mempty
   R6 a b c d e f `mappend` R6 a' b' c' d' e' f' = R6 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f')
 
-instance (Monoid t0, Monoid t1, Monoid t2, Monoid t3, Monoid t4, Monoid t5, Monoid t6) =>
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4), Monoid (Field s5 l5 t5), Monoid (Field s6 l6 t6)) =>
          Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6]) where
   mempty = R7 mempty mempty mempty mempty mempty mempty mempty
   R7 a b c d e f g `mappend` R7 a' b' c' d' e' f' g' = R7 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f') (g `mappend` g')
 
-instance (Monoid t0, Monoid t1, Monoid t2, Monoid t3, Monoid t4, Monoid t5, Monoid t6, Monoid t7) =>
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4), Monoid (Field s5 l5 t5), Monoid (Field s6 l6 t6), Monoid (Field s7 l7 t7)) =>
          Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6, Field s7 l7 t7]) where
   mempty = R8 mempty mempty mempty mempty mempty mempty mempty mempty
   R8 a b c d e f g h `mappend` R8 a' b' c' d' e' f' g' h' = R8 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f') (g `mappend` g') (h `mappend` h')
@@ -807,99 +811,99 @@ class UnRImpl r t where
 instance UnRImpl r () where
   unR _ = ()
 
-type ReWrap r s l t = ( t :~ r :!! l, r :~ SetFieldImpl r l t t, Field s ('Just l) t :~ WrapInField t )
+type ReWrap r s l t = ( t :~ r :!! l, r :~ SetFieldImpl r l t t, Field s ('Just l) t :~ MkField t )
 
 instance (ReWrap r s0 l0 t0) => UnRImpl r (Field s0 ('Just l0) t0) where
-  unR r = wrapInField $ get @r @l0 @t0 r
+  unR r = Field $ get @r @l0 @t0 r
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1) => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1) where
-  unR r = ( wrapInField $ get @r @l0 @t0 r
-          , wrapInField $ get @r @l1 @t1 r
+  unR r = ( Field $ get @r @l0 @t0 r
+          , Field $ get @r @l1 @t1 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2) => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2) where
-  unR r = ( wrapInField $ get @r @l0 @t0 r
-          , wrapInField $ get @r @l1 @t1 r
-          , wrapInField $ get @r @l2 @t2 r
+  unR r = ( Field $ get @r @l0 @t0 r
+          , Field $ get @r @l1 @t1 r
+          , Field $ get @r @l2 @t2 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3) where
-  unR r = ( wrapInField $ get @r @l0 @t0 r
-          , wrapInField $ get @r @l1 @t1 r
-          , wrapInField $ get @r @l2 @t2 r
-          , wrapInField $ get @r @l3 @t3 r
+  unR r = ( Field $ get @r @l0 @t0 r
+          , Field $ get @r @l1 @t1 r
+          , Field $ get @r @l2 @t2 r
+          , Field $ get @r @l3 @t3 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4) where
-  unR r = ( wrapInField $ get @r @l0 @t0 r
-          , wrapInField $ get @r @l1 @t1 r
-          , wrapInField $ get @r @l2 @t2 r
-          , wrapInField $ get @r @l3 @t3 r
-          , wrapInField $ get @r @l4 @t4 r
+  unR r = ( Field $ get @r @l0 @t0 r
+          , Field $ get @r @l1 @t1 r
+          , Field $ get @r @l2 @t2 r
+          , Field $ get @r @l3 @t3 r
+          , Field $ get @r @l4 @t4 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4, ReWrap r s5 l5 t5)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4, Field s5 ('Just l5) t5) where
-  unR r = ( wrapInField $ get @r @l0 @t0 r
-          , wrapInField $ get @r @l1 @t1 r
-          , wrapInField $ get @r @l2 @t2 r
-          , wrapInField $ get @r @l3 @t3 r
-          , wrapInField $ get @r @l4 @t4 r
-          , wrapInField $ get @r @l5 @t5 r
+  unR r = ( Field $ get @r @l0 @t0 r
+          , Field $ get @r @l1 @t1 r
+          , Field $ get @r @l2 @t2 r
+          , Field $ get @r @l3 @t3 r
+          , Field $ get @r @l4 @t4 r
+          , Field $ get @r @l5 @t5 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4, ReWrap r s5 l5 t5, ReWrap r s6 l6 t6)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4, Field s5 ('Just l5) t5, Field s6 ('Just l6) t6) where
-  unR r = ( wrapInField $ get @r @l0 @t0 r
-          , wrapInField $ get @r @l1 @t1 r
-          , wrapInField $ get @r @l2 @t2 r
-          , wrapInField $ get @r @l3 @t3 r
-          , wrapInField $ get @r @l4 @t4 r
-          , wrapInField $ get @r @l5 @t5 r
-          , wrapInField $ get @r @l6 @t6 r
+  unR r = ( Field $ get @r @l0 @t0 r
+          , Field $ get @r @l1 @t1 r
+          , Field $ get @r @l2 @t2 r
+          , Field $ get @r @l3 @t3 r
+          , Field $ get @r @l4 @t4 r
+          , Field $ get @r @l5 @t5 r
+          , Field $ get @r @l6 @t6 r
           )
 
 instance (ReWrap r s0 l0 t0, ReWrap r s1 l1 t1, ReWrap r s2 l2 t2, ReWrap r s3 l3 t3, ReWrap r s4 l4 t4, ReWrap r s5 l5 t5, ReWrap r s6 l6 t6, ReWrap r s7 l7 t7)
          => UnRImpl r (Field s0 ('Just l0) t0, Field s1 ('Just l1) t1, Field s2 ('Just l2) t2, Field s3 ('Just l3) t3, Field s4 ('Just l4) t4, Field s5 ('Just l5) t5, Field s6 ('Just l6) t6, Field s7 ('Just l7) t7) where
-  unR r = ( wrapInField $ get @r @l0 @t0 r
-          , wrapInField $ get @r @l1 @t1 r
-          , wrapInField $ get @r @l2 @t2 r
-          , wrapInField $ get @r @l3 @t3 r
-          , wrapInField $ get @r @l4 @t4 r
-          , wrapInField $ get @r @l5 @t5 r
-          , wrapInField $ get @r @l6 @t6 r
-          , wrapInField $ get @r @l7 @t7 r
+  unR r = ( Field $ get @r @l0 @t0 r
+          , Field $ get @r @l1 @t1 r
+          , Field $ get @r @l2 @t2 r
+          , Field $ get @r @l3 @t3 r
+          , Field $ get @r @l4 @t4 r
+          , Field $ get @r @l5 @t5 r
+          , Field $ get @r @l6 @t6 r
+          , Field $ get @r @l7 @t7 r
           )
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0]) t0 where
-  unR (R1 (MkField a)) = a
+  unR (R1 (unField -> a)) = a
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1]) (t0, t1) where
-  unR (R2 (MkField a) (MkField b)) = (a, b)
+  unR (R2 (unField -> a) (unField -> b)) = (a, b)
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'Nothing t2]) (t0, t1, t2) where
-  unR (R3 (MkField a) (MkField b) (MkField c)) = (a, b, c)
+  unR (R3 (unField -> a) (unField -> b) (unField -> c)) = (a, b, c)
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'Nothing t2, Field s3 'Nothing t3]) (t0, t1, t2, t3) where
-  unR (R4 (MkField a) (MkField b) (MkField c) (MkField d)) = (a, b, c, d)
+  unR (R4 (unField -> a) (unField -> b) (unField -> c) (unField -> d)) = (a, b, c, d)
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'Nothing t2, Field s3 'Nothing t3, Field s4 'Nothing t4])
                  (t0, t1, t2, t3, t4) where
-  unR (R5 (MkField a) (MkField b) (MkField c) (MkField d) (MkField e)) = (a, b, c, d, e)
+  unR (R5 (unField -> a) (unField -> b) (unField -> c) (unField -> d) (unField -> e)) = (a, b, c, d, e)
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'Nothing t2, Field s3 'Nothing t3, Field s4 'Nothing t4, Field s5 'Nothing t5])
                  (t0, t1, t2, t3, t4, t5) where
-  unR (R6 (MkField a) (MkField b) (MkField c) (MkField d) (MkField e) (MkField f)) = (a, b, c, d, e, f)
+  unR (R6 (unField -> a) (unField -> b) (unField -> c) (unField -> d) (unField -> e) (unField -> f)) = (a, b, c, d, e, f)
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'Nothing t2, Field s3 'Nothing t3, Field s4 'Nothing t4, Field s5 'Nothing t5, Field s6 'Nothing t6])
                  (t0, t1, t2, t3, t4, t5, t6) where
-  unR (R7 (MkField a) (MkField b) (MkField c) (MkField d) (MkField e) (MkField f) (MkField g)) = (a, b, c, d, e, f, g)
+  unR (R7 (unField -> a) (unField -> b) (unField -> c) (unField -> d) (unField -> e) (unField -> f) (unField -> g)) = (a, b, c, d, e, f, g)
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'Nothing t2, Field s3 'Nothing t3, Field s4 'Nothing t4, Field s5 'Nothing t5, Field s6 'Nothing t6, Field s7 'Nothing t7])
                  (t0, t1, t2, t3, t4, t5, t6, t7) where
-  unR (R8 (MkField a) (MkField b) (MkField c) (MkField d) (MkField e) (MkField f) (MkField g) (MkField h)) = (a, b, c, d, e, f, g, h)
+  unR (R8 (unField -> a) (unField -> b) (unField -> c) (unField -> d) (unField -> e) (unField -> f) (unField -> g) (unField -> h)) = (a, b, c, d, e, f, g, h)
 
 instance UnRImpl (Rec '[Field s0 'Nothing t0]) (Field s0 'Nothing t0) where
   unR (R1 a) = a
