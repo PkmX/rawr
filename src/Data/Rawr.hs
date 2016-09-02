@@ -9,6 +9,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LiberalTypeSynonyms #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -31,7 +32,7 @@
 --
 --   as well as a few imports and extensions that will be used throughout this tutorial (but are not required to use this library):
 --
---   >>> :set -XBangPatterns -XTypeFamilies -XTypeApplications
+--   >>> :set -XBangPatterns -XTypeFamilies -XTypeApplications -XLiberalTypeSynonyms
 --   >>> import Control.Lens ((^.), (.~), (%~), (&))
 --   >>> :m + Data.Monoid Data.Type.Equality
 --
@@ -103,7 +104,6 @@
 --
 --   >>> foo ^. #c
 --   <BLANKLINE>
---   ...
 --   ... error:
 --   ... RecPartition: Label "c" does not occur in the record
 --   ...
@@ -168,14 +168,12 @@
 --
 --   >>> post ^. #user . #error
 --   <BLANKLINE>
---   ...
 --   ... error:
 --   ... RecPartition: Label "error" does not occur in the record
 --   ...
 --
 --   >>> post & #user . #error .~ "impossible"
 --   <BLANKLINE>
---   ...
 --   ... error:
 --   ... RecPartition: Label "error" does not occur in the record
 --   ...
@@ -287,8 +285,9 @@ module Data.Rawr
   -- ** Indexing records
   , (:!!)(..)
   -- ** Merging & partitioning records
-  , (:*:), pattern (:*:)
-  , (::*:)
+  , (:*:), pattern (:*:) , (::*:)
+  -- ** Updating records
+  , (:<=), pattern (:<=), (::<=)
   -- * Utilities
   , (:~)
   ) where
@@ -422,34 +421,22 @@ instance l ~ l' => IsLabel (l :: Symbol) (Proxy l') where
 --   If you are thinking that the syntax is ugly, we can use the utility operator `:~` to write @a :~ (s :!! l)@ which can be read as the equality constraint @a ~ (s !! t)@. Nice!
 --
 class (:!!) s (l :: Symbol) a | s l -> a where
-  rlens :: forall t b. (t :~ SetFieldImpl s l a b) => Lens s t a b
+  rlens :: forall t b. (t :~ SetFieldImpl l b s) => Lens s t a b
   get :: s -> a
 
-instance ((Rec '[Field (FieldStrictness s l) ('Just l) a], unused) :~ RecPartitionImpl '[ 'Just l ] s) => (:!!) s l a where
-  rlens :: forall t b. (t :~ SetFieldImpl s l a b) => Lens s t a b
-  rlens f s = (\b -> setField @s @l @a @b s b) <$> f (get @s @l s)
+instance ((Rec '[Field (s `GetStrictnessOf` l) ('Just l) a], unused) :~ RecPartitionImpl '[ 'Just l ] s) => (:!!) s l a where
+  rlens :: forall t b. (t :~ SetFieldImpl l b s) => Lens s t a b
+  rlens f s = (\b -> s :<= R1 (Field @(s `GetStrictnessOf` l) @('Just l) b)) <$> f (get @s @l s)
   get (recPartition @('[ 'Just l ]) -> (R1 (unField -> a), _)) = a
 
 type family Snd (t :: *) = (r :: *) where
   Snd (_, b) = b
 
-type family FieldStrictness (xs :: *) (l :: Symbol) = (r :: Strictness) where
-  FieldStrictness (Rec (Field s ('Just l) _ ': _)) l = s
-  FieldStrictness (Rec (Field _ ('Just l') _ ': xs)) l = FieldStrictness (Rec xs) l
+type family GetStrictnessOf (xs :: *) (l :: Symbol) = (r :: Strictness) where
+  GetStrictnessOf (Rec (Field s ('Just l) _ ': _)) l = s
+  GetStrictnessOf (Rec (Field _ ('Just l') _ ': xs)) l = Rec xs `GetStrictnessOf` l
 
-type family SetField (s :: *) (l :: Symbol) (a :: *) (b :: *) = (r :: *) where
-  SetField s l a b = R (Field (FieldStrictness s l) ('Just l) b) :*: Snd (RecPartition '[ 'Just l ] s)
-
-class (r ~ SetField s l a b) => SetFieldImpl (s :: *) (l :: Symbol) (a :: *) (b :: *) (r :: *) | s l a b -> r where
-  setField :: s -> b -> r
-
-instance ( Field (FieldStrictness s l) ('Just l) b :~ MkField b
-         , lhs :~ RImpl (Field (FieldStrictness s l) ('Just l) b)
-         , (r', rhs) :~ RecPartitionImpl '[ 'Just l ] s
-         , r :~ lhs ::*: rhs
-         , r ~ SetField s l a b
-         ) => SetFieldImpl s l a b r where
-  setField s b = toR (Field b :: Field (FieldStrictness s l) ('Just l) b) :*: snd (recPartition @('[ 'Just l ]) s)
+type SetFieldImpl l a s t = (t :~ s ::<= (Rec '[Field (s `GetStrictnessOf` l) ('Just l) a]), Field (s `GetStrictnessOf` l) ('Just l) a :~ MkField a)
 
 -- $records
 -- A record is internally represented as a data family indexed by a list of 'Field':
@@ -626,7 +613,7 @@ instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 
   R8 a b c d e f g h `mappend` R8 a' b' c' d' e' f' g' h' = R8 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f') (g `mappend` g') (h `mappend` h')
 
 -- Need s2fs ~ (s -> f s) for better type inference
-instance {-# OVERLAPPING #-} (a :~ s :!! l, Functor f, s2ft ~ (s -> f t), t :~ SetFieldImpl s l a b) => IsLabel (l :: Symbol) ((a -> f b) -> s2ft) where
+instance {-# OVERLAPPING #-} (a :~ s :!! l, Functor f, s2ft ~ (s -> f t), t :~ SetFieldImpl l b s) => IsLabel (l :: Symbol) ((a -> f b) -> s2ft) where
   fromLabel _ = rlens @s @l @a @t @b
 
 instance {-# OVERLAPPING #-} (a :~ Rec xs :!! l) => IsLabel (l :: Symbol) (Rec xs -> a) where
@@ -700,35 +687,35 @@ instance {-# OVERLAPPING #-}
 instance {-# OVERLAPPING #-}
          ( Field s0 l0 t0 :~ ToFieldImpl a
          , Field s1 l1 t1 :~ ToFieldImpl b
-         , r :~ RecMergeImpl (Rec '[Field s0 l0 t0]) (Rec '[Field s1 l1 t1])
+         , r :~ Rec '[Field s0 l0 t0] ::*: Rec '[Field s1 l1 t1]
          , r ~ R (a, b)
          ) => RImpl (a, b) r where
   {-# INLINE toR #-}
-  toR (toField -> a, toField -> b) = R1 a `recMerge` R1 b
+  toR (toField -> a, toField -> b) = R1 a :*: R1 b
 
 instance {-# OVERLAPPING #-}
          ( Field s0 l0 t0 :~ ToFieldImpl a
          , Field s1 l1 t1 :~ ToFieldImpl b
          , Field s2 l2 t2 :~ ToFieldImpl c
-         , rr :~ RecMergeImpl (Rec '[Field s1 l1 t1]) (Rec '[Field s2 l2 t2])
-         , r :~ RecMergeImpl (Rec '[Field s0 l0 t0]) rr
+         , rr :~ Rec '[Field s1 l1 t1] ::*: Rec '[Field s2 l2 t2]
+         , r :~ Rec '[Field s0 l0 t0] ::*: rr
          , r ~ R (a, b, c)
          ) => RImpl (a, b, c) r where
   {-# INLINE toR #-}
-  toR (toField -> a, toField -> b, toField -> c) = R1 a `recMerge` (R1 b `recMerge` R1 c)
+  toR (toField -> a, toField -> b, toField -> c) = R1 a :*: (R1 b :*: R1 c)
 
 instance {-# OVERLAPPING #-}
          ( Field s0 l0 t0 :~ ToFieldImpl a
          , Field s1 l1 t1 :~ ToFieldImpl b
          , Field s2 l2 t2 :~ ToFieldImpl c
          , Field s3 l3 t3 :~ ToFieldImpl d
-         , rl :~ RecMergeImpl (Rec '[Field s0 l0 t0]) (Rec '[Field s1 l1 t1])
-         , rr :~ RecMergeImpl (Rec '[Field s2 l2 t2]) (Rec '[Field s3 l3 t3])
-         , r :~ RecMergeImpl rl rr
+         , rl :~ Rec '[Field s0 l0 t0] ::*: Rec '[Field s1 l1 t1]
+         , rr :~ Rec '[Field s2 l2 t2] ::*: Rec '[Field s3 l3 t3]
+         , r :~ rl ::*: rr
          , r ~ R (a, b, c, d)
          ) => RImpl (a, b, c, d) r where
   {-# INLINE toR #-}
-  toR (toField -> a, toField -> b, toField -> c, toField -> d) = (R1 a `recMerge` R1 b) `recMerge` (R1 c `recMerge` R1 d)
+  toR (toField -> a, toField -> b, toField -> c, toField -> d) = (R1 a :*: R1 b) :*: (R1 c :*: R1 d)
 
 instance {-# OVERLAPPING #-}
          ( Field s0 l0 t0 :~ ToFieldImpl a
@@ -736,14 +723,14 @@ instance {-# OVERLAPPING #-}
          , Field s2 l2 t2 :~ ToFieldImpl c
          , Field s3 l3 t3 :~ ToFieldImpl d
          , Field s4 l4 t4 :~ ToFieldImpl e
-         , rl :~ RecMergeImpl (Rec '[Field s0 l0 t0]) (Rec '[Field s1 l1 t1])
-         , rrr :~ RecMergeImpl (Rec '[Field s3 l3 t3]) (Rec '[Field s4 l4 t4])
-         , rr :~ RecMergeImpl (Rec '[Field s2 l2 t2]) rrr
-         , r :~ RecMergeImpl rl rr
+         , rl :~ (::*:) (Rec '[Field s0 l0 t0]) (Rec '[Field s1 l1 t1])
+         , rrr :~ (::*:) (Rec '[Field s3 l3 t3]) (Rec '[Field s4 l4 t4])
+         , rr :~ (::*:) (Rec '[Field s2 l2 t2]) rrr
+         , r :~ (::*:) rl rr
          , r ~ R (a, b, c, d, e)
          ) => RImpl (a, b, c, d, e) r where
   {-# INLINE toR #-}
-  toR (toField -> a, toField -> b, toField -> c, toField -> d, toField -> e) = (R1 a `recMerge` R1 b) `recMerge` (R1 c `recMerge` (R1 d `recMerge` R1 e))
+  toR (toField -> a, toField -> b, toField -> c, toField -> d, toField -> e) = (R1 a :*: R1 b) :*: (R1 c :*: (R1 d :*: R1 e))
 
 instance {-# OVERLAPPING #-}
          ( Field s0 l0 t0 :~ ToFieldImpl a
@@ -752,16 +739,16 @@ instance {-# OVERLAPPING #-}
          , Field s3 l3 t3 :~ ToFieldImpl d
          , Field s4 l4 t4 :~ ToFieldImpl e
          , Field s5 l5 t5 :~ ToFieldImpl f
-         , rlr :~ RecMergeImpl (Rec '[Field s1 l1 t1]) (Rec '[Field s2 l2 t2])
-         , rl :~ RecMergeImpl (Rec '[Field s0 l0 t0]) rlr
-         , rrr :~ RecMergeImpl (Rec '[Field s4 l4 t4]) (Rec '[Field s5 l5 t5])
-         , rr :~ RecMergeImpl (Rec '[Field s3 l3 t3]) rrr
-         , r :~ RecMergeImpl rl rr
+         , rlr :~ (::*:) (Rec '[Field s1 l1 t1]) (Rec '[Field s2 l2 t2])
+         , rl :~ (::*:) (Rec '[Field s0 l0 t0]) rlr
+         , rrr :~ (::*:) (Rec '[Field s4 l4 t4]) (Rec '[Field s5 l5 t5])
+         , rr :~ (::*:) (Rec '[Field s3 l3 t3]) rrr
+         , r :~ (::*:) rl rr
          , r ~ R (a, b, c, d, e, f)
          ) => RImpl (a, b, c, d, e, f) r where
   {-# INLINE toR #-}
   toR (toField -> a, toField -> b, toField -> c, toField -> d, toField -> e, toField -> f) =
-    (R1 a `recMerge` (R1 b `recMerge` R1 c)) `recMerge` (R1 d `recMerge` (R1 e `recMerge` R1 f))
+    (R1 a :*: (R1 b :*: R1 c)) :*: (R1 d :*: (R1 e :*: R1 f))
 
 instance {-# OVERLAPPING #-}
          ( Field s0 l0 t0 :~ ToFieldImpl a
@@ -771,17 +758,17 @@ instance {-# OVERLAPPING #-}
          , Field s4 l4 t4 :~ ToFieldImpl e
          , Field s5 l5 t5 :~ ToFieldImpl f
          , Field s6 l6 t6 :~ ToFieldImpl g
-         , rlr :~ RecMergeImpl (Rec '[Field s1 l1 t1]) (Rec '[Field s2 l2 t2])
-         , rl :~ RecMergeImpl (Rec '[Field s0 l0 t0]) rlr
-         , rrl :~ RecMergeImpl (Rec '[Field s3 l3 t3]) (Rec '[Field s4 l4 t4])
-         , rrr :~ RecMergeImpl (Rec '[Field s5 l5 t5]) (Rec '[Field s6 l6 t6])
-         , rr :~ RecMergeImpl rrl rrr
-         , r :~ RecMergeImpl rl rr
+         , rlr :~ (::*:) (Rec '[Field s1 l1 t1]) (Rec '[Field s2 l2 t2])
+         , rl :~ (::*:) (Rec '[Field s0 l0 t0]) rlr
+         , rrl :~ (::*:) (Rec '[Field s3 l3 t3]) (Rec '[Field s4 l4 t4])
+         , rrr :~ (::*:) (Rec '[Field s5 l5 t5]) (Rec '[Field s6 l6 t6])
+         , rr :~ (::*:) rrl rrr
+         , r :~ (::*:) rl rr
          , r ~ R (a, b, c, d, e, f, g)
          ) => RImpl (a, b, c, d, e, f, g) r where
   {-# INLINE toR #-}
   toR (toField -> a, toField -> b, toField -> c, toField -> d, toField -> e, toField -> f, toField -> g) =
-    (R1 a `recMerge` (R1 b `recMerge` R1 c)) `recMerge` ((R1 d `recMerge` R1 e) `recMerge` (R1 f `recMerge` R1 g))
+    (R1 a :*: (R1 b :*: R1 c)) :*: ((R1 d :*: R1 e) :*: (R1 f :*: R1 g))
 
 instance {-# OVERLAPPING #-}
          ( Field s0 l0 t0 :~ ToFieldImpl a
@@ -792,18 +779,18 @@ instance {-# OVERLAPPING #-}
          , Field s5 l5 t5 :~ ToFieldImpl f
          , Field s6 l6 t6 :~ ToFieldImpl g
          , Field s7 l7 t7 :~ ToFieldImpl h
-         , rll :~ RecMergeImpl (Rec '[Field s0 l0 t0]) (Rec '[Field s1 l1 t1])
-         , rlr :~ RecMergeImpl (Rec '[Field s2 l2 t2]) (Rec '[Field s3 l3 t3])
-         , rl :~ RecMergeImpl rll rlr
-         , rrl :~ RecMergeImpl (Rec '[Field s4 l4 t4]) (Rec '[Field s5 l5 t5])
-         , rrr :~ RecMergeImpl (Rec '[Field s6 l6 t6]) (Rec '[Field s7 l7 t7])
-         , rr :~ RecMergeImpl rrl rrr
-         , r :~ RecMergeImpl rl rr
+         , rll :~ (::*:) (Rec '[Field s0 l0 t0]) (Rec '[Field s1 l1 t1])
+         , rlr :~ (::*:) (Rec '[Field s2 l2 t2]) (Rec '[Field s3 l3 t3])
+         , rl :~ (::*:) rll rlr
+         , rrl :~ (::*:) (Rec '[Field s4 l4 t4]) (Rec '[Field s5 l5 t5])
+         , rrr :~ (::*:) (Rec '[Field s6 l6 t6]) (Rec '[Field s7 l7 t7])
+         , rr :~ (::*:) rrl rrr
+         , r :~ (::*:) rl rr
          , r ~ R (a, b, c, d, e, f, g, h)
          ) => RImpl (a, b, c, d, e, f, g, h) r where
   {-# INLINE toR #-}
   toR (toField -> a, toField -> b, toField -> c, toField -> d, toField -> e, toField -> f, toField -> g, toField -> h) =
-    ((R1 a `recMerge` R1 b) `recMerge` (R1 c `recMerge` R1 d)) `recMerge` ((R1 e `recMerge` R1 f) `recMerge` (R1 g `recMerge` R1 h))
+    ((R1 a :*: R1 b) :*: (R1 c :*: R1 d)) :*: ((R1 e :*: R1 f) :*: (R1 g :*: R1 h))
 
 class UnRImpl r t where
   unR :: r -> t
@@ -811,7 +798,7 @@ class UnRImpl r t where
 instance UnRImpl r () where
   unR _ = ()
 
-type ReWrap r s l t = ( t :~ r :!! l, r :~ SetFieldImpl r l t t, Field s ('Just l) t :~ MkField t )
+type ReWrap r s l t = ( t :~ r :!! l, r :~ r ::<= (Rec '[Field (GetStrictnessOf r l) ('Just l) t]), Field s ('Just l) t :~ MkField t )
 
 instance (ReWrap r s0 l0 t0) => UnRImpl r (Field s0 ('Just l0) t0) where
   unR r = Field $ get @r @l0 @t0 r
@@ -1066,74 +1053,87 @@ instance RecConsImpl (Field s0 l0 t0) (Rec '[]) (Rec '[Field s0 l0 t0]) where
   {-# INLINE recCons #-}
   recCons a R0 = R1 a
 
-type family RecMerge (xs :: *) (ys :: *) = (r :: *) where
-  RecMerge (Rec '[]) (Rec ys) = Rec ys
-  RecMerge (Rec xs) (Rec '[]) = Rec xs
-  RecMerge (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys)) = RecMerge' (CmpSymbol lx ly) (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys))
-  RecMerge (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) = TypeError (Text "RecMerge: Cannot merge labeled and unlabeled fields")
-  RecMerge (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy ('Just l) ty ': ys)) = TypeError (Text "RecMerge: Cannot merge labeled and unlabeled fields")
-  RecMerge (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) = Field sx 'Nothing tx `RecCons` (Rec xs `RecMerge` Rec (Field sy 'Nothing ty ': ys))
+type family RecMerge (update :: Bool) (xs :: *) (ys :: *) = (r :: *) where
+  RecMerge _ (Rec '[]) (Rec ys) = Rec ys
+  RecMerge _ (Rec xs) (Rec '[]) = Rec xs
+  RecMerge u (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys)) = RecMerge' (CmpSymbol lx ly) u (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys))
+  RecMerge _ (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) = TypeError (Text "RecMerge: Cannot merge labeled and unlabeled fields")
+  RecMerge _ (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy ('Just l) ty ': ys)) = TypeError (Text "RecMerge: Cannot merge labeled and unlabeled fields")
+  RecMerge u (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) = Field sx 'Nothing tx `RecCons` (RecMerge u (Rec xs) (Rec (Field sy 'Nothing ty ': ys)))
 
-class (r ~ RecMerge xs ys) => RecMergeImpl (xs :: *) (ys :: *) (r :: *) | xs ys -> r where
+class (r ~ RecMerge update xs ys) => RecMergeImpl (update :: Bool) (xs :: *) (ys :: *) (r :: *) | update xs ys -> r where
   recMerge :: xs -> ys -> r
 
-instance RecMergeImpl (Rec '[]) (Rec ys) (Rec ys) where
+instance {-# OVERLAPPING #-} RecMergeImpl u (Rec '[]) (Rec '[]) (Rec '[]) where
+  recMerge R0 R0 = R0
+
+instance {-# OVERLAPPING #-} RecMergeImpl u (Rec '[]) (Rec ys) (Rec ys) where
   {-# INLINE recMerge #-}
   recMerge R0 ys = ys
 
-instance RecMergeImpl (Rec xs) (Rec '[]) (Rec xs) where
+instance {-# OVERLAPPING #-} RecMergeImpl u (Rec xs) (Rec '[]) (Rec xs) where
   {-# INLINE recMerge #-}
   recMerge xs R0 = xs
 
-instance ( r :~ RecMerge'Impl (CmpSymbol lx ly) (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys))
-         ) => RecMergeImpl (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys)) r where
+instance ( r :~ RecMerge'Impl (CmpSymbol lx ly) u (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys))
+         ) => RecMergeImpl u (Rec (Field sx ('Just lx) tx ': xs)) (Rec (Field sy ('Just ly) ty ': ys)) r where
   {-# INLINE recMerge #-}
-  recMerge = recMerge' @(CmpSymbol lx ly)
+  recMerge = recMerge' @(CmpSymbol lx ly) @u
 
-instance ( r ~ RecMerge (Rec (Field s ('Just l) t ': xs)) (Rec (Field sy 'Nothing ty ': ys))
-         ) => RecMergeImpl (Rec (Field s ('Just l) t ': xs)) (Rec (Field sy 'Nothing ty ': ys)) r where
+instance ( r ~ RecMerge u (Rec (Field s ('Just l) t ': xs)) (Rec (Field sy 'Nothing ty ': ys))
+         ) => RecMergeImpl u (Rec (Field s ('Just l) t ': xs)) (Rec (Field sy 'Nothing ty ': ys)) r where
   recMerge = undefined
 
-instance ( r ~ RecMerge (Rec (Field s 'Nothing t ': xs)) (Rec (Field s' ('Just l) t' ': ys))
-         ) => RecMergeImpl (Rec (Field s 'Nothing t ': xs)) (Rec (Field s' ('Just l) t' ': ys)) r where
+instance ( r ~ RecMerge u (Rec (Field s 'Nothing t ': xs)) (Rec (Field s' ('Just l) t' ': ys))
+         ) => RecMergeImpl u (Rec (Field s 'Nothing t ': xs)) (Rec (Field s' ('Just l) t' ': ys)) r where
   recMerge = undefined
 
 instance ( Field sx 'Nothing tx :~ RecHeadImpl (Rec (Field sx 'Nothing tx ': xs))
          , Rec xs :~ RecTailImpl (Rec (Field sx 'Nothing tx ': xs))
-         , r' :~ RecMergeImpl (Rec xs) (Rec (Field sy 'Nothing ty ': ys))
+         , r' :~ RecMergeImpl u (Rec xs) (Rec (Field sy 'Nothing ty ': ys))
          , r :~ RecConsImpl (Field sx 'Nothing tx) r'
-         , r ~ RecMerge (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) -- This shouldn't be needed.
-         ) => RecMergeImpl (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) r where
+         , r ~ RecMerge u (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) -- This shouldn't be needed.
+         ) => RecMergeImpl u (Rec (Field sx 'Nothing tx ': xs)) (Rec (Field sy 'Nothing ty ': ys)) r where
   {-# INLINE recMerge #-}
-  recMerge xs ys = recHead xs `recCons` (recTail xs `recMerge` ys)
+  recMerge xs ys = recHead xs `recCons` (recMerge @u (recTail xs) ys)
 
-type family RecMerge' (ord :: Ordering) (xs :: *) (ys :: *) = (r :: *) where
-  RecMerge' 'EQ (Rec (Field _ ('Just l) _ ': _)) _ = TypeError (Text "Duplicate labels " :<>: ShowType l)
-  RecMerge' 'LT (Rec (Field sx lx tx ': xs)) ys = Field sx lx tx `RecCons` (Rec xs `RecMerge` ys)
-  RecMerge' 'GT xs (Rec (Field sy ly ty ': ys)) = Field sy ly ty `RecCons` (xs `RecMerge` Rec ys)
+type family RecMerge' (ord :: Ordering) (update :: Bool) (xs :: *) (ys :: *) = (r :: *) where
+  RecMerge' 'EQ 'False (Rec (Field _ ('Just l) _ ': _)) _ = TypeError (Text "Duplicate labels " :<>: ShowType l)
+  RecMerge' 'EQ 'True (Rec (_ ': xs)) (Rec (Field s l t ': ys)) = Field s l t `RecCons` RecMerge 'True (Rec xs) (Rec ys)
+  RecMerge' 'LT u (Rec (Field sx lx tx ': xs)) ys = Field sx lx tx `RecCons` (RecMerge u (Rec xs) ys)
+  RecMerge' 'GT u xs (Rec (Field sy ly ty ': ys)) = Field sy ly ty `RecCons` (RecMerge u xs (Rec ys))
 
-class (r ~ RecMerge' ord xs ys) => RecMerge'Impl (ord :: Ordering) (xs :: *) (ys :: *) (r :: *) | ord xs ys -> r where
+class (r ~ RecMerge' ord update xs ys) => RecMerge'Impl (ord :: Ordering) (update :: Bool) (xs :: *) (ys :: *) (r :: *) | ord update xs ys -> r where
   recMerge' :: xs -> ys -> r
 
-instance (r ~ RecMerge' 'EQ (Rec (Field sx l tx ': xs)) (Rec (Field sy l ty ': ys)))
-         => RecMerge'Impl 'EQ (Rec (Field sx l tx ': xs)) (Rec (Field sy l ty ': ys)) r where
+instance (r ~ RecMerge' 'EQ 'False (Rec (Field sx l tx ': xs)) (Rec (Field sy l ty ': ys)))
+         => RecMerge'Impl 'EQ 'False (Rec (Field sx l tx ': xs)) (Rec (Field sy l ty ': ys)) r where
   recMerge' = undefined
+
+instance ( Field s l t :~ RecHeadImpl (Rec (Field s l t ': ys))
+         , Rec xs :~ RecTailImpl (Rec (f ': xs))
+         , Rec ys :~ RecTailImpl (Rec (Field s l t ': ys))
+         , r' :~ RecMergeImpl 'True (Rec xs) (Rec ys)
+         , r :~ Field s l t `RecConsImpl` r'
+         ) => RecMerge'Impl 'EQ 'True (Rec (f ': xs)) (Rec (Field s l t ': ys)) r where
+  {-# INLINE recMerge' #-}
+  recMerge' xs ys = recHead ys `recCons` recMerge @'True (recTail xs) (recTail ys)
 
 instance ( Field sx lx tx :~ RecHeadImpl (Rec (Field sx lx tx ': xs))
          , Rec xs :~ RecTailImpl (Rec (Field sx lx tx ': xs))
-         , merged :~ RecMergeImpl (Rec xs) ys
+         , merged :~ RecMergeImpl u (Rec xs) ys
          , r :~ RecConsImpl (Field sx lx tx) merged
-         ) => RecMerge'Impl 'LT (Rec (Field sx lx tx ': xs)) ys r where
+         ) => RecMerge'Impl 'LT u (Rec (Field sx lx tx ': xs)) ys r where
   {-# INLINE recMerge' #-}
-  recMerge' xs ys = recHead xs `recCons` (recTail xs `recMerge` ys)
+  recMerge' xs ys = recHead xs `recCons` (recMerge @u (recTail xs) ys)
 
 instance ( Field sy ly ty :~ RecHeadImpl (Rec (Field sy ly ty ': ys))
          , Rec ys :~ RecTailImpl (Rec (Field sy ly ty ': ys))
-         , merged :~ RecMergeImpl xs (Rec ys)
+         , merged :~ RecMergeImpl u xs (Rec ys)
          , r :~ RecConsImpl (Field sy ly ty) merged
-         ) => RecMerge'Impl 'GT xs (Rec (Field sy ly ty ': ys)) r where
+         ) => RecMerge'Impl 'GT u xs (Rec (Field sy ly ty ': ys)) r where
   {-# INLINE recMerge' #-}
-  recMerge' xs ys = recHead ys `recCons` (xs `recMerge` recTail ys)
+  recMerge' xs ys = recHead ys `recCons` (recMerge @u xs (recTail ys))
 
 type family RecConsFst (x :: *) (xs :: *) = (r :: *) | r -> x xs where
   RecConsFst x (Rec xs, Rec ys) = (x `RecCons` Rec xs, Rec ys)
@@ -1234,7 +1234,7 @@ instance (r ~ RecPartition' 'GT ('Just l ': ls) (Rec xs))
 --   >>> :kind! R ( Field 'Lazy 'Nothing Int ) :*: R ( Field 'Strict 'Nothing Bool )
 --   R ( Field 'Lazy 'Nothing Int ) :*: R ( Field 'Strict 'Nothing Bool ) :: *
 --   = Rec '[Field 'Lazy 'Nothing Int, Field 'Strict 'Nothing Bool]
-type (:*:) x y = x `RecMerge` y
+type (:*:) xs ys = RecMerge 'False xs ys
 infixr 1 :*:
 
 type family RecLabels (xs :: *) = (r :: [Maybe Symbol]) where
@@ -1247,9 +1247,8 @@ type family RecLabels (xs :: *) = (r :: [Maybe Symbol]) where
 --          let f :: (r :~ R ( "a" := Int ) ::*: ys) => r -> ys
 --              f (R ( _ :: "a" := Int) :*: ys) = ys
 --       :}
-class (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl (RecLabels xs) r) => (::*:) xs ys r
+type (::*:) xs ys r = (r :~ RecMergeImpl 'False xs ys, (xs, ys) :~ RecPartitionImpl (RecLabels xs) r)
 infix 1 ::*:
-instance (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl (RecLabels xs) r) => (::*:) xs ys r
 
 -- | === Constructor
 --
@@ -1313,7 +1312,43 @@ instance (r :~ RecMergeImpl xs ys, (xs, ys) :~ RecPartitionImpl (RecLabels xs) r
 
 pattern (:*:) :: forall xs ys r. (r :~ xs ::*: ys) => xs -> ys -> r
 pattern (:*:) xs ys <- (recPartition @(RecLabels xs) -> (xs, ys)) where
-        (:*:) xs ys = xs `recMerge` ys
+        (:*:) xs ys = recMerge @'False xs ys
+
+-- | Update the record lhs with rhs.
+--
+--   You can modify the type of a field:
+--
+--   >>> :kind! R ( "a" := Int ) :<= R ( "a" := Bool )
+--   R ( "a" := Int ) :<= R ( "a" := Bool ) :: *
+--   = Rec '[Field 'Lazy ('Just "a") Bool]
+--
+--   Or even add a new field:
+--
+--   >>> :kind! R () :<= R ( "a" := Bool )
+--   R () :<= R ( "a" := Bool ) :: *
+--   = Rec '[Field 'Lazy ('Just "a") Bool]
+type (:<=) xs ys = RecMerge 'True xs ys
+infixl 1 :<=
+
+-- | Update the record lhs with rhs, value version.
+--
+--   >>> R ( #a := (1 :: Int) ) :<= R ( #a := True )
+--   R ( a := True )
+--
+--   >>> R () :<= R ( #a := True )
+--   R ( a := True )
+--
+--   Note: It is defined as a pattern for consistency with `:*:` and future extensibility. You actually cannot pattern match on it!
+pattern (:<=) :: (r :~ xs ::<= ys) => xs -> ys -> r
+pattern (:<=) xs ys <- (unimplemented -> (xs, ys)) where
+        (:<=) = recMerge @'True
+
+-- | A utility constraint for you to write types involving the pattern `:<=`. See `::*:`.
+type (::<=) = RecMergeImpl 'True
+infixl 1 ::<=
+
+unimplemented :: a
+unimplemented = error "unimplemented"
 
 type family PPRec (r :: *) = (e :: ErrorMessage) where
   PPRec (Rec '[]) = Text "R ()"
