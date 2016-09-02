@@ -293,11 +293,13 @@ module Data.Rawr
   ) where
 
 import Control.DeepSeq
+import Data.Functor
 import Data.Proxy
 import GHC.Generics (Generic)
 import GHC.TypeLits
 import GHC.Types
 import GHC.OverloadedLabels
+import qualified Text.ParserCombinators.ReadP as P
 
 -- | A helper type synonym to convert functional dependencies into nicer type-equality-like syntax.
 --
@@ -402,14 +404,25 @@ pattern Field' :: t -> Field 'Strict 'Nothing t
 pattern Field' t <- (unField -> t) where
   Field' t = Field t
 
-instance (KnownSymbol l, Show t) => Show (Field 'Lazy ('Just l) t) where
-  show (l := t) = symbolVal l ++ " := " ++ show t
+class    StrictnessOperator (s :: Strictness) where strictnessOperator :: String
+instance StrictnessOperator 'Lazy             where strictnessOperator = " := "
+instance StrictnessOperator 'Strict           where strictnessOperator = " :=! "
 
-instance (KnownSymbol l, Show t) => Show (Field 'Strict ('Just l) t) where
-  show (l :=! t) = symbolVal l ++ " :=! " ++ show t
+instance (StrictnessOperator s, KnownSymbol l, Show t) => Show (Field s ('Just l) t) where
+  showsPrec p (unField -> t) = showParen (p > 2) $ showString (symbolVal l) . showString (strictnessOperator @s) . showsPrec 3 t
+    where l = Proxy :: Proxy l
 
 instance Show t => Show (Field s 'Nothing t) where
-  show (unField -> t) = show t
+  showsPrec p (unField -> t) = showsPrec p t
+
+instance (StrictnessOperator s, KnownSymbol l, Read t, Field s ('Just l) t :~ MkField t) => Read (Field s ('Just l) t) where
+  readsPrec p = readParen (p > 2) $ P.readP_to_S $ do
+    _ <- P.string (symbolVal (Proxy :: Proxy l))
+    _ <- P.string (strictnessOperator @s)
+    Field @s @('Just l) <$> P.readS_to_P (readsPrec 3 :: ReadS t)
+
+instance (Read t, Field s 'Nothing t :~ MkField t) => Read (Field s 'Nothing t) where
+  readsPrec p s = [ (Field @s @'Nothing t, s') | (t, s') <- readsPrec p s ]
 
 type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 
@@ -469,7 +482,7 @@ type SetFieldImpl l a s t = (t :~ s ::<= (Rec '[Field (s `GetStrictnessOf` l) ('
 --
 -- Mixing labeled and unlabeled fields isn't prohibited. This is enforced by the library's smart constructors.
 --
--- 'Eq', 'Ord', 'Show', 'Monoid', 'NFData' instances are provided if all of the fields are also instances of respective classes.
+-- 'Eq', 'Ord', 'Show', 'Read', 'Monoid', 'NFData' instances are provided if all of the fields are also instances of respective classes.
 --
 -- Currently, records with up to 8 fields are supported.
 
@@ -514,6 +527,66 @@ instance (Show (Field s0 l0 t0), Show (Field s1 l1 t1), Show (Field s2 l2 t2), S
 instance (Show (Field s0 l0 t0), Show (Field s1 l1 t1), Show (Field s2 l2 t2), Show (Field s3 l3 t3), Show (Field s4 l4 t4), Show (Field s5 l5 t5), Show (Field s6 l6 t6), Show (Field s7 l7 t7))
          => Show (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6, Field s7 l7 t7]) where
   show (R8 a b c d e f g h) = "R ( " ++ show a ++ ", " ++ show b ++ ", " ++ show c ++ ", " ++ show d ++ ", " ++ show e ++ ", " ++ show f ++ ", " ++ show g ++ ", " ++ show h ++ " )"
+
+instance Read (Rec '[]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ()" $> R0
+
+instance Read (Field s0 l0 t0) => Read (Rec '[Field s0 l0 t0]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R1 <$> P.readS_to_P (readsPrec 0)) <* P.string " )"
+
+instance (Read (Field s0 l0 t0), Read (Field s1 l1 t1)) => Read (Rec '[Field s0 l0 t0, Field s1 l1 t1]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R2 <$> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0))) <* P.string " )"
+
+instance (Read (Field s0 l0 t0), Read (Field s1 l1 t1), Read (Field s2 l2 t2)) => Read (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R3 <$> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0))) <* P.string " )"
+
+instance (Read (Field s0 l0 t0), Read (Field s1 l1 t1), Read (Field s2 l2 t2), Read (Field s3 l3 t3))
+         => Read (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R4 <$> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0))) <* P.string " )"
+
+instance (Read (Field s0 l0 t0), Read (Field s1 l1 t1), Read (Field s2 l2 t2), Read (Field s3 l3 t3), Read (Field s4 l4 t4))
+         => Read (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R5 <$> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0))) <* P.string " )"
+
+instance (Read (Field s0 l0 t0), Read (Field s1 l1 t1), Read (Field s2 l2 t2), Read (Field s3 l3 t3), Read (Field s4 l4 t4), Read (Field s5 l5 t5))
+         => Read (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R6 <$> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0))) <* P.string " )"
+
+instance (Read (Field s0 l0 t0), Read (Field s1 l1 t1), Read (Field s2 l2 t2), Read (Field s3 l3 t3), Read (Field s4 l4 t4), Read (Field s5 l5 t5), Read (Field s6 l6 t6))
+         => Read (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R7 <$> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0))) <* P.string " )"
+
+instance (Read (Field s0 l0 t0), Read (Field s1 l1 t1), Read (Field s2 l2 t2), Read (Field s3 l3 t3), Read (Field s4 l4 t4), Read (Field s5 l5 t5), Read (Field s6 l6 t6), Read (Field s7 l7 t7))
+         => Read (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6, Field s7 l7 t7]) where
+  readsPrec _ = P.readP_to_S $ P.string "R ( " *> (R8 <$> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0) <* P.string ", ")
+                                                      <*> (P.readS_to_P (readsPrec 0))) <* P.string " )"
 
 deriving instance Eq (Rec '[])
 deriving instance (Eq t0) => Eq (Rec '[Field s0 l0 t0])
