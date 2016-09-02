@@ -454,10 +454,10 @@ type SetFieldImpl l a s t = (t :~ s ::<= (Rec '[Field (s `GetStrictnessOf` l) ('
 -- $records
 -- A record is internally represented as a data family indexed by a list of `Field`:
 --
--- >  data    family   Rec (xs :: [*])
--- >  data    instance Rec '[] = R0
--- >  newtype instance Rec '[Field s0 l0 t0] = R1 (Field s0 l0 t0)
--- >  data    instance Rec '[Field s0 l0 t0, Field s1 l1 t1] = R2 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1)
+-- >  data family   Rec (xs :: [*])
+-- >  data instance Rec '[] = R0
+-- >  data instance Rec '[Field s0 l0 t0] = R1 {-# UNPACK #-} !(Field s0 l0 t0)
+-- >  data instance Rec '[Field s0 l0 t0, Field s1 l1 t1] = R2 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1)
 -- >  ...
 --
 -- The @UNPACK@ pragmas ensure that a `Field`'s constructor is erased at runtime, thus the following record:
@@ -486,22 +486,22 @@ type SetFieldImpl l a s t = (t :~ s ::<= (Rec '[Field (s `GetStrictnessOf` l) ('
 --
 -- Currently, records with up to 8 fields are supported.
 
-data    family   Rec (xs :: [*])
-data    instance Rec '[] = R0
-newtype instance Rec '[ Field s0 l0 t0 ] = R1 (Field s0 l0 t0)
-data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 ] =
+data family   Rec (xs :: [*])
+data instance Rec '[] = R0
+data instance Rec '[ Field s0 l0 t0 ] = R1 {-# UNPACK #-} !(Field s0 l0 t0)
+data instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 ] =
   R2 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1)
-data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 ] =
+data instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 ] =
   R3 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2)
-data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 ] =
+data instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 ] =
   R4 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2) {-# UNPACK #-} !(Field s3 l3 t3)
-data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 ] =
+data instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 ] =
   R5 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2) {-# UNPACK #-} !(Field s3 l3 t3) {-# UNPACK #-} !(Field s4 l4 t4)
-data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 , Field s5 l5 t5 ] =
+data instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 , Field s5 l5 t5 ] =
   R6 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2) {-# UNPACK #-} !(Field s3 l3 t3) {-# UNPACK #-} !(Field s4 l4 t4) {-# UNPACK #-} !(Field s5 l5 t5)
-data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 , Field s5 l5 t5 , Field s6 l6 t6 ] =
+data instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 , Field s5 l5 t5 , Field s6 l6 t6 ] =
   R7 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2) {-# UNPACK #-} !(Field s3 l3 t3) {-# UNPACK #-} !(Field s4 l4 t4) {-# UNPACK #-} !(Field s5 l5 t5) {-# UNPACK #-} !(Field s6 l6 t6)
-data    instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 , Field s5 l5 t5 , Field s6 l6 t6 , Field s7 l7 t7 ] =
+data instance Rec '[ Field s0 l0 t0 , Field s1 l1 t1 , Field s2 l2 t2 , Field s3 l3 t3 , Field s4 l4 t4 , Field s5 l5 t5 , Field s6 l6 t6 , Field s7 l7 t7 ] =
   R8 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1) {-# UNPACK #-} !(Field s2 l2 t2) {-# UNPACK #-} !(Field s3 l3 t3) {-# UNPACK #-} !(Field s4 l4 t4) {-# UNPACK #-} !(Field s5 l5 t5) {-# UNPACK #-} !(Field s6 l6 t6) {-# UNPACK #-} !(Field s7 l7 t7)
 
 instance Show (Rec '[]) where
