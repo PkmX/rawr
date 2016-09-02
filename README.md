@@ -1,5 +1,7 @@
 # RAWR! An Extensible Record Library
 
+[![Build Status](https://travis-ci.org/PkmX/rawr.svg?branch=master)](https://travis-ci.org/PkmX/rawr)
+
 This library provides anonymous extensible records using GHC 8.0 features, with the following goals/features:
 
 * The syntax should be very close to that of Haskell's record system.
