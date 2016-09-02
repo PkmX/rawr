@@ -38,7 +38,7 @@
 --
 --   == Record Types
 --
---   The type function 'R' is used to construct a record type:
+--   The type function `R` is used to construct a record type:
 --
 --   >>> type Foo = R ( "a" := Int, "b" := Bool )
 --
@@ -53,7 +53,7 @@
 --
 --   == Records
 --
---   'R' is used to construct a value of type @Foo@:
+--   `R` is used to construct a value of type @Foo@:
 --
 --   >>> let foo = R ( #a := 42, #b := True ) :: Foo
 --
@@ -119,12 +119,12 @@
 --
 --   === Pseudo row-polymorphism
 --
---   You can match on parts of a record using 'P':
+--   You can match on parts of a record using `P`:
 --
 --   >>> case foo of r@(P ( _ := a :: "a" := Int )) -> r & #a .~ (a * 2)
 --   R ( a := 84, b := True )
 --
---   The difference is that while 'R' needs to match all fields of a record (as it is the inverse of constructing a record using `R`), 'P' doesn't.
+--   The difference is that while `R` needs to match all fields of a record (as it is the inverse of constructing a record using `R`), `P` doesn't.
 --
 --   With @PartialTypeSignatures@, you may omit the types of fields in the signature if they can be inferred from the usage:
 --
@@ -180,7 +180,7 @@
 --
 --   == Extensible Records
 --
---   You can merge two records together with ':*:':
+--   You can merge two records together with `:*:`:
 --
 --   >>> R ( #foo := True ) :*: R ( #bar := False )
 --   R ( bar := False, foo := True )
@@ -216,7 +216,7 @@
 --
 --   == Strict Fields
 --
---   To declare a field as strict, use ':=!' instead of ':='.
+--   To declare a field as strict, use `:=!` instead of `:=`.
 --
 --   >>> type Bar = R ( "a" :=! Int, "b" := Bool, "c" :=! Char )
 --   >>> data BarHs = BarHs { a :: !Int, b :: Bool, c :: !Char }
@@ -318,7 +318,7 @@ infix 0 :~
 -- | Strictness annotations for a 'Field'.
 data Strictness = Lazy | Strict
 
--- | A 'Field' consists of its strictness, an optional label (type-level 'Symbol') and the field's type:
+-- | A `Field` consists of its `Strictness`, an optional label (type-level `Symbol`) and the field's type:
 --
 --   >>> :kind Field
 --   Field :: Strictness -> Maybe Symbol -> * -> *
@@ -344,7 +344,7 @@ instance MkField t (Field 'Strict l t) where
   {-# INLINE mkField #-}
   mkField !t = Field_ t
 
--- | Construct or pattern match on a 'Field'.
+-- | Construct or pattern match on a `Field`.
 --
 --   >>> :t Field @'Lazy @'Nothing True
 --   Field @'Lazy @'Nothing True :: Field 'Lazy 'Nothing Bool
@@ -431,7 +431,7 @@ instance l ~ l' => IsLabel (l :: Symbol) (Proxy l') where
 
 -- | @(:!!) s l a@ says that the record @s@ has a field of type @a@ at index @l@, and provides a @Lens s t a b@ to get/set that particular field.
 --
---   If you are thinking that the syntax is ugly, we can use the utility operator `:~` to write @a :~ (s :!! l)@ which can be read as the equality constraint @a ~ (s !! t)@. Nice!
+--   If you are thinking that the syntax is ugly, we can use the utility operator `:~` to write @a `:~` (s `:!!` l)@ which can be read as the equality constraint @a ~ (s !! t)@. Nice!
 --
 class (:!!) s (l :: Symbol) a | s l -> a where
   rlens :: forall t b. (t :~ SetFieldImpl l b s) => Lens s t a b
@@ -452,7 +452,7 @@ type family GetStrictnessOf (xs :: *) (l :: Symbol) = (r :: Strictness) where
 type SetFieldImpl l a s t = (t :~ s ::<= (Rec '[Field (s `GetStrictnessOf` l) ('Just l) a]), Field (s `GetStrictnessOf` l) ('Just l) a :~ MkField a)
 
 -- $records
--- A record is internally represented as a data family indexed by a list of 'Field':
+-- A record is internally represented as a data family indexed by a list of `Field`:
 --
 -- >  data    family   Rec (xs :: [*])
 -- >  data    instance Rec '[] = R0
@@ -460,7 +460,7 @@ type SetFieldImpl l a s t = (t :~ s ::<= (Rec '[Field (s `GetStrictnessOf` l) ('
 -- >  data    instance Rec '[Field s0 l0 t0, Field s1 l1 t1] = R2 {-# UNPACK #-} !(Field s0 l0 t0) {-# UNPACK #-} !(Field s1 l1 t1)
 -- >  ...
 --
--- The @UNPACK@ pragmas ensure that a 'Field''s constructor is erased at runtime, thus the following record:
+-- The @UNPACK@ pragmas ensure that a `Field`'s constructor is erased at runtime, thus the following record:
 --
 -- >  Rec '[ "a" := Int, "b" := Bool, "c" := String ]
 --
@@ -482,7 +482,7 @@ type SetFieldImpl l a s t = (t :~ s ::<= (Rec '[Field (s `GetStrictnessOf` l) ('
 --
 -- Mixing labeled and unlabeled fields isn't prohibited. This is enforced by the library's smart constructors.
 --
--- 'Eq', 'Ord', 'Show', 'Read', 'Monoid', 'NFData' instances are provided if all of the fields are also instances of respective classes.
+-- `Eq`, `Ord`, `Show`, `Read`, `Monoid`, `NFData` instances are provided if all of the fields are also instances of respective classes.
 --
 -- Currently, records with up to 8 fields are supported.
 
@@ -705,7 +705,7 @@ instance {-# OVERLAPPING #-} (r ~ Field s l t) => ToFieldImpl (Field s l t) r wh
 instance {-# OVERLAPPING #-} (r ~ Field 'Lazy 'Nothing a, r ~ ToField a) => ToFieldImpl a r where
   toField = Field
 
--- | 'R' takes a tuple, where each non-`Field` element @a@ is wrapped as a lazy non-labeled field @Field ''Lazy' ''Nothing' t@, and performs a merge-sort using `:*:` if the fields are labeled.
+-- | `R` takes a tuple, where each non-`Field` element @a@ is wrapped as a lazy non-labeled field @Field `'Lazy` `'Nothing` t@, and performs a merge-sort using `:*:` if the fields are labeled.
 --
 --   >>> :kind! R ( "foo" := Bool , "bar" := Int )
 --   R ( "foo" := Bool , "bar" := Int ) :: *
@@ -996,14 +996,14 @@ instance UnRImpl (Rec '[Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'No
                        (Field s0 'Nothing t0, Field s1 'Nothing t1, Field s2 'Nothing t2, Field s3 'Nothing t3, Field s4 'Nothing t4, Field s5 'Nothing t5, Field s6 'Nothing t6, Field s7 'Nothing t7) where
   unR (R8 a b c d e f g h) = (a, b, c, d, e, f, g, h)
 
--- | When 'R' is used as a constructor, it is equivalent to the type family 'R', except that it operates at value-level.
+-- | When `R` is used as a constructor, it is equivalent to the type family `R`, except that it operates at value-level.
 --
---   As a pattern, 'R' destructs all fields of a record into a tuple of 'Field's. For labeled records, the 'Field's in the tuple may be in arbitrarily order.
+--   As a pattern, `R` destructs all fields of a record into a tuple of `Field`s. For labeled records, the `Field`s in the tuple may be in arbitrarily order.
 pattern R :: (r :~ RImpl t, t :~ UnRImpl r) => t -> r
 pattern R x <- (unR -> x) where
         R = toR
 
--- | Given a tuple of 'Field's, 'P' binds the matching fields from the record. (Note: Partial matching is only available for labeled records.)
+-- | Given a tuple of `Field`s, `P` binds the matching fields from the record. (Note: Partial matching is only available for labeled records.)
 pattern P :: (t :~ UnRImpl r) => t -> r
 pattern P x <- (unR -> x)
 
