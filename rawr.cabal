@@ -22,6 +22,7 @@ description:    This library provides anonymous extensible records using GHC 8.0
                 See @<https://hackage.haskell.org/package/rawr/docs/Data-Rawr.html Data.Rawr>@ for a tutorial of this library.
 category:       Records
 homepage:       https://github.com/pkmx/rawr
+bug-reports:    https://github.com/pkmx/rawr/issues
 author:         PkmX
 maintainer:     pkmx.tw@gmail.com
 copyright:      2016 PkmX
@@ -32,6 +33,10 @@ cabal-version:  >= 1.10
 
 extra-source-files:
     README.md
+
+source-repository head
+  type: git
+  location: https://github.com/pkmx/rawr
 
 library
   hs-source-dirs:

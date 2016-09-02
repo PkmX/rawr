@@ -24,6 +24,7 @@ author:              PkmX
 maintainer:          pkmx.tw@gmail.com
 copyright:           2016 PkmX
 category:            Records
+github:              pkmx/rawr
 
 ghc-options: -Wall
 
