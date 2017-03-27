@@ -294,6 +294,7 @@ module Data.Rawr
 
 import Control.DeepSeq
 import Data.Functor
+import Data.Type.Bool
 import Data.Proxy
 import GHC.Generics (Generic)
 import GHC.TypeLits
@@ -732,6 +733,14 @@ instance {-# OVERLAPPING #-} (r ~ Field 'Lazy 'Nothing a, r ~ ToField a) => ToFi
 --   ... RecPartition: Label "a" does not occur in the record
 --   ...
 --
+--   Only up-to 8 fields are supported (for now):
+--
+--   >>> R ( (), (), (), (), (), (), (), (), () )
+--   <BLANKLINE>
+--   ... error:
+--   ... R: too many fields
+--   ...
+--
 type family R (t :: *) = (r :: *) where
   R () = Rec '[]
   R (a, b) = Rec '[ToField a] :*: Rec '[ToField b]
@@ -741,7 +750,7 @@ type family R (t :: *) = (r :: *) where
   R (a, b, c, d, e, f) = (Rec '[ToField a] :*: (Rec '[ToField b] :*: Rec '[ToField c])) :*: (Rec '[ToField d] :*: (Rec '[ToField e] :*: Rec '[ToField f]))
   R (a, b, c, d, e, f, g) = (Rec '[ToField a] :*: (Rec '[ToField b] :*: Rec '[ToField c])) :*: ((Rec '[ToField d] :*: Rec '[ToField e]) :*: (Rec '[ToField f] :*: Rec '[ToField g]))
   R (a, b, c, d, e, f, g, h) = ((Rec '[ToField a] :*: Rec '[ToField b]) :*: (Rec '[ToField c] :*: Rec '[ToField d])) :*: ((Rec '[ToField e] :*: Rec '[ToField f]) :*: (Rec '[ToField g] :*: Rec '[ToField h]))
-  R a = Rec '[ToField a]
+  R a = If (IsTuple a) (TypeError (Text "R: too many fields")) Rec '[ToField a]
 
 class (r ~ R t) => RImpl (t :: *) (r :: *) | t -> r where
   toR :: t -> r
@@ -1086,7 +1095,7 @@ instance RecTailImpl (Rec '[Field s0 l0 t0]) (Rec '[]) where
   recTail (R1 _) = R0
 
 -- UNSAFE! Internal usage only: `RecCons` doesn't respect the label ordering of a record.
-type family RecCons (x :: *) (xs :: *) = (r :: *) | r -> x xs where
+type family RecCons (x :: *) (xs :: *) = (r :: *) where
   RecCons a (Rec '[b, c, d, e, f, g, h]) = Rec '[a, b, c, d, e, f, g, h]
   RecCons a (Rec '[b, c, d, e, f, g]) = Rec '[a, b, c, d, e, f, g]
   RecCons a (Rec '[b, c, d, e, f]) = Rec '[a, b, c, d, e, f]
@@ -1095,6 +1104,7 @@ type family RecCons (x :: *) (xs :: *) = (r :: *) | r -> x xs where
   RecCons a (Rec '[b, c]) = Rec '[a, b, c]
   RecCons a (Rec '[b]) = Rec '[a, b]
   RecCons a (Rec '[]) = Rec '[a]
+  RecCons a (Rec _) = TypeError (Text "RecCons: too many fields")
 
 class (r ~ RecCons x xs) => RecConsImpl x xs r | x xs -> r, r -> x xs where
   recCons :: x -> xs -> r
@@ -1208,7 +1218,7 @@ instance ( Field sy ly ty :~ RecHeadImpl (Rec (Field sy ly ty ': ys))
   {-# INLINE recMerge' #-}
   recMerge' xs ys = recHead ys `recCons` (recMerge @u xs (recTail ys))
 
-type family RecConsFst (x :: *) (xs :: *) = (r :: *) | r -> x xs where
+type family RecConsFst (x :: *) (xs :: *) = (r :: *) where
   RecConsFst x (Rec xs, Rec ys) = (x `RecCons` Rec xs, Rec ys)
 
 class (r ~ RecConsFst x xs) => RecConsFstImpl (x :: *) (xs :: *) (r :: *) | x xs -> r, r -> x xs where
@@ -1220,7 +1230,7 @@ instance ( Rec xs' :~ RecConsImpl x (Rec xs)
   {-# INLINE recConsFst #-}
   recConsFst x (xs, ys) = (x `recCons` xs, ys)
 
-type family RecConsSnd (x :: *) (xs :: *) = (r :: *) | r -> x xs where
+type family RecConsSnd (x :: *) (xs :: *) = (r :: *) where
   RecConsSnd x (Rec xs, Rec ys) = (Rec xs, x `RecCons` Rec ys)
 
 class (r ~ RecConsSnd x xs) => RecConsSndImpl (x :: *) (xs :: *) (r :: *) | x xs -> r, r -> x xs where
@@ -1341,6 +1351,14 @@ infix 1 ::*:
 --   ... RecMerge: Cannot merge labeled and unlabeled fields
 --   ...
 --
+--   The merged record must not have more than 8 records:
+--
+--   >>> R ( #a := (), #b := (), #c := (), #d := (), #e := (), #f := (), #g := (), #h := () ) :*: R ( #i := () )
+--   <BLANKLINE>
+--   ... error:
+--   ... RecCons: too many fields
+--   ...
+--
 --   === Pattern
 --
 --   Partition a record based on the type of LHS.
@@ -1451,3 +1469,69 @@ type family PPField (r :: *) = (e :: ErrorMessage) where
 type (:<>:) x y = x ':<>: y
 type Text x = 'Text x
 type ShowType x = 'ShowType x
+
+type family IsTuple (t :: Type) = (b :: Bool) where
+    -- forM_ [62, 61..0] $ \i -> when (i /= 1) $ putStrLn $ "    IsTuple (" ++ intercalate ", " (replicate i "_") ++ ") = 'True"
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _, _) = 'True
+    IsTuple (_, _, _, _, _) = 'True
+    IsTuple (_, _, _, _) = 'True
+    IsTuple (_, _, _) = 'True
+    IsTuple (_, _) = 'True
+    IsTuple () = 'True
+    IsTuple _ = 'False
