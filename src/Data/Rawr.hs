@@ -326,11 +326,11 @@ data Strictness = Lazy | Strict
 --
 data Field (s :: Strictness) (l :: Maybe Symbol) t = Field_ { unField :: t } deriving (Eq, Ord, Generic, NFData)
 
-instance (Monoid t) => Monoid (Field 'Lazy l t) where
+instance (Monoid t, (Semigroup (Field 'Lazy l t))) => Monoid (Field 'Lazy l t) where
   mempty = Field mempty
   Field x `mappend` Field y = Field (x `mappend` y)
 
-instance (Monoid t) => Monoid (Field 'Strict l t) where
+instance (Monoid t,  (Semigroup (Field 'Strict l t))) => Monoid (Field 'Strict l t) where
   mempty = Field $! mempty
   Field x `mappend` Field y = Field $! (x `mappend` y)
 
@@ -428,7 +428,7 @@ instance (Read t, Field s 'Nothing t :~ MkField t) => Read (Field s 'Nothing t) 
 type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
 
 instance l ~ l' => IsLabel (l :: Symbol) (Proxy l') where
-  fromLabel _ = Proxy
+  fromLabel = Proxy
 
 -- | @(:!!) s l a@ says that the record @s@ has a field of type @a@ at index @l@, and provides a @Lens s t a b@ to get/set that particular field.
 --
@@ -647,51 +647,132 @@ instance (NFData t0, NFData t1, NFData t2, NFData t3, NFData t4, NFData t5, NFDa
   {-# INLINE rnf #-}
   rnf (R8 a b c d e f g h) = rnf a `seq` rnf b `seq` rnf c `seq` rnf d `seq` rnf e `seq` rnf f `seq` rnf g `seq` rnf h
 
-instance Monoid (Rec '[]) where
+instance (Semigroup (Rec '[])) => Monoid (Rec '[]) where
   mempty = R0
   _ `mappend` _ = R0
 
-instance (Monoid (Field s0 l0 t0)) => Monoid (Rec '[Field s0 l0 t0]) where
+instance (Monoid (Field s0 l0 t0), (Semigroup (Rec '[Field s0 l0 t0]))) => Monoid (Rec '[Field s0 l0 t0]) where
   mempty = R1 mempty
   R1 a `mappend` R1 a' = R1 (a `mappend` a')
 
-instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1]) where
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), (Semigroup (Rec '[Field s0 l0 t0, Field s1 l1 t1]))) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1]) where
   mempty = R2 mempty mempty
   R2 a b `mappend` R2 a' b' = R2 (a `mappend` a') (b `mappend` b')
 
-instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2]) where
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), (Semigroup (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2]))) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2]) where
   mempty = R3 mempty mempty mempty
   R3 a b c `mappend` R3 a' b' c' = R3 (a `mappend` a') (b `mappend` b') (c `mappend` c')
 
-instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3]) where
+instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), (Semigroup (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3]))) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3]) where
   mempty = R4 mempty mempty mempty mempty
   R4 a b c d `mappend` R4 a' b' c' d' = R4 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d')
 
-instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4)) => Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4]) where
+instance
+  ( Monoid (Field s0 l0 t0),
+    Monoid (Field s1 l1 t1),
+    Monoid (Field s2 l2 t2),
+    Monoid (Field s3 l3 t3),
+    Monoid (Field s4 l4 t4),
+    ( Semigroup
+        ( Rec
+            '[ Field s0 l0 t0,
+               Field s1 l1 t1,
+               Field s2 l2 t2,
+               Field s3 l3 t3,
+               Field s4 l4 t4
+             ]
+        )
+    )
+  ) =>
+  Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4])
+  where
   mempty = R5 mempty mempty mempty mempty mempty
   R5 a b c d e `mappend` R5 a' b' c' d' e' = R5 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e')
 
-instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4), Monoid (Field s5 l5 t5)) =>
-         Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5]) where
+instance
+  ( Monoid (Field s0 l0 t0),
+    Monoid (Field s1 l1 t1),
+    Monoid (Field s2 l2 t2),
+    Monoid (Field s3 l3 t3),
+    Monoid (Field s4 l4 t4),
+    Monoid (Field s5 l5 t5),
+    ( Semigroup
+        ( Rec
+            '[ Field s0 l0 t0,
+               Field s1 l1 t1,
+               Field s2 l2 t2,
+               Field s3 l3 t3,
+               Field s4 l4 t4,
+               Field s5 l5 t5
+             ]
+        )
+    )
+  ) =>
+  Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5])
+  where
   mempty = R6 mempty mempty mempty mempty mempty mempty
   R6 a b c d e f `mappend` R6 a' b' c' d' e' f' = R6 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f')
 
-instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4), Monoid (Field s5 l5 t5), Monoid (Field s6 l6 t6)) =>
-         Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6]) where
+instance
+  ( Monoid (Field s0 l0 t0),
+    Monoid (Field s1 l1 t1),
+    Monoid (Field s2 l2 t2),
+    Monoid (Field s3 l3 t3),
+    Monoid (Field s4 l4 t4),
+    Monoid (Field s5 l5 t5),
+    Monoid (Field s6 l6 t6),
+    ( Semigroup
+        ( Rec
+            '[ Field s0 l0 t0,
+               Field s1 l1 t1,
+               Field s2 l2 t2,
+               Field s3 l3 t3,
+               Field s4 l4 t4,
+               Field s5 l5 t5,
+               Field s6 l6 t6
+             ]
+        )
+    )
+  ) =>
+  Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6])
+  where
   mempty = R7 mempty mempty mempty mempty mempty mempty mempty
   R7 a b c d e f g `mappend` R7 a' b' c' d' e' f' g' = R7 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f') (g `mappend` g')
 
-instance (Monoid (Field s0 l0 t0), Monoid (Field s1 l1 t1), Monoid (Field s2 l2 t2), Monoid (Field s3 l3 t3), Monoid (Field s4 l4 t4), Monoid (Field s5 l5 t5), Monoid (Field s6 l6 t6), Monoid (Field s7 l7 t7)) =>
-         Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6, Field s7 l7 t7]) where
+instance
+  ( Monoid (Field s0 l0 t0),
+    Monoid (Field s1 l1 t1),
+    Monoid (Field s2 l2 t2),
+    Monoid (Field s3 l3 t3),
+    Monoid (Field s4 l4 t4),
+    Monoid (Field s5 l5 t5),
+    Monoid (Field s6 l6 t6),
+    Monoid (Field s7 l7 t7),
+    ( Semigroup
+        ( Rec
+            '[ Field s0 l0 t0,
+               Field s1 l1 t1,
+               Field s2 l2 t2,
+               Field s3 l3 t3,
+               Field s4 l4 t4,
+               Field s5 l5 t5,
+               Field s6 l6 t6,
+               Field s7 l7 t7
+             ]
+        )
+    )
+  ) =>
+  Monoid (Rec '[Field s0 l0 t0, Field s1 l1 t1, Field s2 l2 t2, Field s3 l3 t3, Field s4 l4 t4, Field s5 l5 t5, Field s6 l6 t6, Field s7 l7 t7])
+  where
   mempty = R8 mempty mempty mempty mempty mempty mempty mempty mempty
   R8 a b c d e f g h `mappend` R8 a' b' c' d' e' f' g' h' = R8 (a `mappend` a') (b `mappend` b') (c `mappend` c') (d `mappend` d') (e `mappend` e') (f `mappend` f') (g `mappend` g') (h `mappend` h')
 
 -- Need s2fs ~ (s -> f s) for better type inference
 instance {-# OVERLAPPING #-} (a :~ s :!! l, Functor f, s2ft ~ (s -> f t), t :~ SetFieldImpl l b s) => IsLabel (l :: Symbol) ((a -> f b) -> s2ft) where
-  fromLabel _ = rlens @s @l @a @t @b
+  fromLabel = rlens @s @l @a @t @b
 
 instance {-# OVERLAPPING #-} (a :~ Rec xs :!! l) => IsLabel (l :: Symbol) (Rec xs -> a) where
-  fromLabel _ = get @(Rec xs) @l @a
+  fromLabel = get @(Rec xs) @l @a
 
 type family ToField (a :: *) = (r :: *) where
   ToField (Field s l t) = Field s l t
@@ -1392,13 +1473,13 @@ infix 1 ::*:
 --   >>> case R ( #a := True, #b := (1 :: Int) ) of R ( _ :: "a" := Int ) :*: _ -> ()
 --   <BLANKLINE>
 --   ... error:
---   ... Couldn't match type ‘Int’ with ‘Bool’ arising from a pattern
+--   ... Couldn't match type ‘Bool’ with ‘Int’
 --   ...
 --
 --   >>> case R ( True, 1 :: Int ) of R ( a :: Int ) :*: _ -> ()
 --   <BLANKLINE>
 --   ... error:
---   ... Couldn't match type ‘Int’ with ‘Bool’ arising from a pattern
+--   ... Couldn't match type ‘Bool’ with ‘Int’ arising from a pattern
 --   ...
 
 pattern (:*:) :: forall xs ys r. (r :~ xs ::*: ys) => xs -> ys -> r
